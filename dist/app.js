@@ -203,6 +203,9 @@ function registerWebMcpTools() {
         if (!Number.isInteger(consumptionIndex) || !state.costing.consumptionOptions[consumptionIndex]) {
           throw new Error("consumptionOption debe ser 1, 2 o 3");
         }
+        if (!hasValidConsumptionDistribution()) {
+          throw new Error("Los porcentajes de consumo deben sumar 100% antes de aplicar una combinación");
+        }
         selectCostCombination(priceIndex, consumptionIndex);
         applyCostCombination(priceIndex, consumptionIndex);
         return {
@@ -578,7 +581,7 @@ function wireEvents() {
       applyCostCombination(state.costing.selectedPriceIndex, state.costing.selectedConsumptionIndex);
     }
     if (costAction?.dataset.costAction === "open-cost-model") {
-      activateTab("cost-model");
+      activateTab("cost-model", { focusPanel: true });
     }
 
     const modelAction = event.target.closest("[data-model-action]");
@@ -715,6 +718,11 @@ function updateCostModelOutputs(changedProfileIndex = null) {
     if (input) input.value = formatEditableNumber(option.foodCostPerPax, 5);
   });
   refreshCostCalculator();
+}
+
+function hasValidConsumptionDistribution() {
+  const percentTotal = calculateConsumptionPercentTotal(state.costing.beverageProfiles);
+  return Math.abs(percentTotal - 100) <= 0.01;
 }
 
 function handleFixedCostInput(target) {
@@ -893,6 +901,22 @@ function refreshCostCalculator() {
   if (!matrix || !summary) return;
   const formatter = (value) => formatCurrency(value, state.quote.currency);
   if (dom.fixedCostTotal) dom.fixedCostTotal.textContent = formatter(state.costing.fixedCost);
+  if (!hasValidConsumptionDistribution()) {
+    const percentTotal = calculateConsumptionPercentTotal(state.costing.beverageProfiles);
+    const message = `La distribución actual suma ${formatEditableNumber(percentTotal, 2)}%. Complétala hasta 100% para calcular y aplicar una utilidad válida.`;
+    matrix.innerHTML = `
+      <div class="calculator-blocked" role="status">
+        <strong>Completa los porcentajes de consumo</strong>
+        <p>${escapeHtml(message)}</p>
+        <button class="button button-secondary" type="button" data-cost-action="open-cost-model">Editar bebidas</button>
+      </div>`;
+    summary.innerHTML = `
+      <div class="calculator-blocked-summary">
+        <p class="eyebrow">Cálculo pendiente</p>
+        <h3>La matriz se habilitará cuando los porcentajes sumen 100%.</h3>
+      </div>`;
+    return;
+  }
   const selectedPrice = state.costing.selectedPriceIndex;
   const selectedConsumption = state.costing.selectedConsumptionIndex;
   const headerCells = state.costing.consumptionOptions.map((option) => `
@@ -950,9 +974,14 @@ function selectCostCombination(priceIndex, consumptionIndex) {
 }
 
 function applyCostCombination(priceIndex, consumptionIndex) {
+  if (!hasValidConsumptionDistribution()) {
+    showToast("Completa los porcentajes de consumo hasta 100%", true);
+    activateTab("cost-model", { focusPanel: true });
+    return false;
+  }
   const price = state.costing.priceOptions[priceIndex];
   const consumption = state.costing.consumptionOptions[consumptionIndex];
-  if (!Number.isFinite(price) || !consumption) return;
+  if (!Number.isFinite(price) || !consumption) return false;
   let barItem = state.items.find((item) => item.presetKey === "openBar")
     || state.items.find((item) => item.name.toLocaleLowerCase("es").includes("barra libre"));
   if (!barItem) {
@@ -984,9 +1013,10 @@ function applyCostCombination(priceIndex, consumptionIndex) {
   renderItemsEditor();
   renderPreview();
   showToast(`${formatCurrency(price, state.quote.currency)} y ${formatQuantity(consumption.drinksPerPax)} bebidas/pax aplicados`);
+  return true;
 }
 
-function activateTab(tabName) {
+function activateTab(tabName, { focusPanel = false } = {}) {
   document.querySelectorAll("[data-tab]").forEach((button) => {
     const active = button.dataset.tab === tabName;
     button.classList.toggle("is-active", active);
@@ -999,6 +1029,15 @@ function activateTab(tabName) {
     panel.classList.toggle("is-active", active);
     panel.hidden = !active;
   });
+
+  if (focusPanel) {
+    requestAnimationFrame(() => {
+      const heading = document.querySelector(`#panel-${tabName} h2`);
+      if (!heading) return;
+      heading.tabIndex = -1;
+      heading.focus();
+    });
+  }
 }
 
 function populateBoundFields() {

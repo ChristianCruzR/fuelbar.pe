@@ -708,6 +708,28 @@ button:disabled {
   width: 100%;
 }
 
+.calculator-blocked {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  min-width: min(100%, 360px);
+  padding: 18px;
+  color: #664b16;
+  background: #fff8e8;
+  border: 1px solid #efd38f;
+  border-radius: 12px;
+}
+
+.calculator-blocked p,
+.calculator-blocked-summary p {
+  margin: 0;
+}
+
+.calculator-blocked-summary h3 {
+  margin: 5px 0 0;
+  color: #fff;
+}
+
 .derived-cost-field {
   align-content: start;
   padding: 11px;
@@ -755,6 +777,11 @@ button:disabled {
   display: inline-grid;
   place-items: center;
   cursor: pointer;
+}
+
+.file-button:has(+ #costing-file-input:focus-visible) {
+  outline: 3px solid rgba(24, 145, 164, 0.34);
+  outline-offset: 3px;
 }
 
 .import-status {
