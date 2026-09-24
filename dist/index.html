@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#434445" />
+    <meta name="description" content="Crea, previsualiza y descarga cotizaciones de FuelBar en PDF." />
+    <title>Cotizador FuelBar</title>
+    <link rel="icon" type="image/png" href="./assets/fuelbar-logo.png" />
+    <link rel="apple-touch-icon" href="./assets/fuelbar-logo.png" />
+    <link rel="stylesheet" href="./styles.css?v=6" />
+    <script defer src="./vendor/pdf-lib.min.js?v=1"></script>
+    <script type="module" src="./app.js?v=7"></script>
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="brand-lockup" aria-label="Cotizador FuelBar">
+        <img class="brand-mark" src="./assets/fuelbar-logo.png" alt="" aria-hidden="true" />
+        <div>
+          <p class="eyebrow">FuelBar</p>
+          <h1>Cotizador</h1>
+        </div>
+      </div>
+      <div class="header-actions">
+        <p class="save-status" id="save-status" aria-live="polite">Borrador sin guardar</p>
+        <button class="button button-ghost" type="button" id="save-button">Guardar borrador</button>
+        <button class="button button-secondary" type="button" id="preview-button">Vista previa</button>
+        <button class="button button-primary" type="button" id="download-button">Descargar PDF</button>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <section class="editor" aria-label="Editor de cotización">
+        <nav class="editor-tabs" aria-label="Secciones del editor" role="tablist">
+          <button class="tab-button is-active" id="tab-data" data-tab="data" role="tab" aria-selected="true" aria-controls="panel-data">Datos</button>
+          <button class="tab-button" id="tab-costing" data-tab="costing" role="tab" aria-selected="false" aria-controls="panel-costing" tabindex="-1">Calculadora</button>
+          <button class="tab-button" id="tab-items" data-tab="items" role="tab" aria-selected="false" aria-controls="panel-items" tabindex="-1">Artículos <span id="item-count" class="tab-count">4</span></button>
+          <button class="tab-button" id="tab-terms" data-tab="terms" role="tab" aria-selected="false" aria-controls="panel-terms" tabindex="-1">Condiciones</button>
+        </nav>
+
+        <div class="editor-scroll">
+          <section class="tab-panel is-active" id="panel-data" role="tabpanel" aria-labelledby="tab-data">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Documento</p>
+                <h2>Datos de la cotización</h2>
+              </div>
+              <button class="text-button danger-text" type="button" id="reset-button">Restablecer</button>
+            </div>
+
+            <div class="form-card">
+              <h3>Cotización</h3>
+              <div class="field-grid cols-2">
+                <label class="field">Número<input data-bind="quote.number" autocomplete="off" /></label>
+                <label class="field">N.° de orden<input data-bind="quote.orderNumber" autocomplete="off" /></label>
+                <label class="field">Fecha de emisión<input type="date" data-bind="quote.issueDate" /></label>
+                <label class="field">IGV (%)<input type="number" min="0" max="100" step="0.1" data-bind="quote.taxRate" /></label>
+                <label class="field">Moneda
+                  <select data-bind="quote.currency">
+                    <option value="PEN">Soles (PEN)</option>
+                    <option value="USD">Dólares (USD)</option>
+                  </select>
+                </label>
+                <label class="field">Validez (días)<input type="number" min="0" step="1" data-bind="quote.validityDays" /></label>
+              </div>
+            </div>
+
+            <div class="form-card">
+              <h3>FuelBar</h3>
+              <div class="field-grid cols-2">
+                <label class="field">Nombre comercial<input data-bind="company.displayName" /></label>
+                <label class="field">Razón social<input data-bind="company.legalName" /></label>
+                <label class="field">RUC<input data-bind="company.taxId" inputmode="numeric" /></label>
+                <label class="field">Sitio web<input data-bind="company.website" /></label>
+                <label class="field span-2">Dirección<input data-bind="company.address" /></label>
+                <label class="field">Ciudad / distrito<input data-bind="company.city" /></label>
+                <label class="field">País<input data-bind="company.country" /></label>
+                <label class="field">Teléfono<input data-bind="company.phone" /></label>
+                <label class="field">Correo<input type="email" data-bind="company.email" /></label>
+              </div>
+            </div>
+
+            <div class="form-card">
+              <h3>Cliente</h3>
+              <div class="field-grid cols-2">
+                <label class="field span-2">Nombre o empresa<input data-bind="customer.name" /></label>
+                <label class="field">RUC / documento<input data-bind="customer.taxId" /></label>
+                <label class="field">Teléfono<input data-bind="customer.phone" /></label>
+                <label class="field">Correo<input type="email" data-bind="customer.email" /></label>
+                <label class="field">Dirección<input data-bind="customer.address" /></label>
+              </div>
+            </div>
+
+            <div class="form-card">
+              <h3>Evento</h3>
+              <div class="field-grid cols-2">
+                <label class="field span-2">Nombre del evento<input data-bind="event.title" /></label>
+                <label class="field">Pax<input type="number" min="1" step="1" data-bind="event.pax" /></label>
+                <label class="field">Fecha<input type="date" data-bind="event.date" /></label>
+                <label class="field">Hora de inicio<input type="time" data-bind="event.startTime" /></label>
+                <label class="field">Hora de fin<input type="time" data-bind="event.endTime" /></label>
+                <label class="field span-2">Lugar<input data-bind="event.location" /></label>
+              </div>
+            </div>
+          </section>
+
+          <section class="tab-panel" id="panel-costing" role="tabpanel" aria-labelledby="tab-costing" hidden>
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Análisis interno</p>
+                <h2>Calculadora de precios</h2>
+              </div>
+            </div>
+
+            <p class="section-note">Cruza tres precios con tres probabilidades de consumo por pax. La utilidad no incluye el IGV y este análisis interno no aparece en el PDF.</p>
+
+            <div class="form-card">
+              <h3>Supuestos compartidos</h3>
+              <div class="field-grid cols-2">
+                <label class="field">Costo fijo total<input type="number" min="0" step="0.01" data-bind="costing.fixedCost" /></label>
+                <label class="field">Descuento publicidad (%)<input type="number" min="0" max="100" step="0.01" data-bind="costing.advertisingDiscount" /></label>
+                <label class="field span-2">Cobro adicional<input type="number" min="0" step="0.01" data-bind="costing.additionalCharge" /></label>
+              </div>
+            </div>
+
+            <div id="costing-editor" class="costing-grid"></div>
+          </section>
+
+          <section class="tab-panel" id="panel-items" role="tabpanel" aria-labelledby="tab-items" hidden>
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Detalle</p>
+                <h2>Artículos</h2>
+              </div>
+            </div>
+            <div class="preset-bar">
+              <label class="field grow">Añadir artículo
+                <select id="preset-select">
+                  <option value="blank">Artículo vacío</option>
+                  <option value="additionalCharge">Cobro adicional</option>
+                  <option value="bartruck">BarTruck</option>
+                  <option value="water">Servicio de Agua y Gaseosas</option>
+                  <option value="openBar">Servicio de Bar - Barra Libre</option>
+                  <option value="transport">Transporte</option>
+                </select>
+              </label>
+              <button class="button button-secondary align-end" type="button" id="add-item-button">Añadir</button>
+            </div>
+            <div id="items-editor" class="stack"></div>
+          </section>
+
+          <section class="tab-panel" id="panel-terms" role="tabpanel" aria-labelledby="tab-terms" hidden>
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Texto legal y alcance</p>
+                <h2>Condiciones y notas</h2>
+              </div>
+            </div>
+
+            <div class="form-card">
+              <div class="card-heading-row">
+                <h3>Condiciones</h3>
+                <button class="text-button" type="button" data-add-list="terms">Añadir condición</button>
+              </div>
+              <div id="terms-editor" class="ordered-editor"></div>
+            </div>
+
+            <div class="form-card">
+              <div class="card-heading-row">
+                <h3>Nuestro servicio incluye</h3>
+                <button class="text-button" type="button" data-add-list="includedServices">Añadir servicio</button>
+              </div>
+              <div id="services-editor" class="ordered-editor"></div>
+            </div>
+
+            <div class="form-card">
+              <h3>Notas adicionales</h3>
+              <label class="field">Texto libre<textarea rows="6" data-bind="additionalNotes" placeholder="Información adicional que deba aparecer en la cotización"></textarea></label>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section class="preview-panel" aria-label="Vista previa de la cotización">
+        <div class="preview-toolbar">
+          <div>
+            <p class="eyebrow">Vista en vivo</p>
+            <p id="preview-summary" class="preview-summary"></p>
+          </div>
+          <span class="paper-size">Carta · 8.5 × 11 in</span>
+        </div>
+        <div class="paper-scroll">
+          <article id="quote-document" class="quote-document" aria-label="Documento de cotización"></article>
+        </div>
+      </section>
+    </main>
+
+    <dialog id="preview-dialog" class="preview-dialog">
+      <div class="dialog-toolbar">
+        <div>
+          <p class="eyebrow">Vista previa final</p>
+          <h2>Cotización <span id="dialog-quote-number"></span></h2>
+        </div>
+        <div class="header-actions">
+          <button class="button button-secondary" type="button" id="dialog-download-button">Descargar PDF</button>
+          <button class="icon-button" type="button" id="close-dialog-button" aria-label="Cerrar vista previa">×</button>
+        </div>
+      </div>
+      <div id="dialog-preview" class="dialog-preview"></div>
+    </dialog>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  </body>
+</html>
