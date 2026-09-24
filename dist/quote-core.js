@@ -1,5 +1,14 @@
 export const STORAGE_KEY = "fuelbar-cotizador-v2";
 
+// Promedio ponderado por bebida tomado del costeo original:
+// (costo de cada cóctel × su porcentaje estimado de consumo).
+export const WEIGHTED_DRINK_COST = 5.507089523809524;
+
+export function calculateFoodCostPerPax(drinksPerPax) {
+  const drinks = Math.max(0, finiteNumber(drinksPerPax));
+  return Math.round((drinks * WEIGHTED_DRINK_COST + Number.EPSILON) * 100000) / 100000;
+}
+
 function todayInLocalTime() {
   const today = new Date();
   const year = today.getFullYear();
@@ -113,9 +122,9 @@ export const DEFAULT_STATE = {
     additionalCharge: 0,
     priceOptions: [110, 130, 150],
     consumptionOptions: [
-      { id: "consumption-8", drinksPerPax: 8, foodCostPerPax: 44.05675 },
-      { id: "consumption-9", drinksPerPax: 9, foodCostPerPax: 49.56383 },
-      { id: "consumption-10", drinksPerPax: 10, foodCostPerPax: 55.07092 },
+      { id: "consumption-8", drinksPerPax: 8, foodCostPerPax: calculateFoodCostPerPax(8) },
+      { id: "consumption-9", drinksPerPax: 9, foodCostPerPax: calculateFoodCostPerPax(9) },
+      { id: "consumption-10", drinksPerPax: 10, foodCostPerPax: calculateFoodCostPerPax(10) },
     ],
     selectedPriceIndex: 1,
     selectedConsumptionIndex: 1,

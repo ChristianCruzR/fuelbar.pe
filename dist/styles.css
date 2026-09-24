@@ -335,6 +335,13 @@ button:disabled {
   background: #eef2f5;
 }
 
+.field input[readonly] {
+  color: #385b60;
+  background: #edf8f9;
+  border-color: #b8dce0;
+  cursor: default;
+}
+
 .field-help {
   color: var(--muted);
   font-size: 12px;

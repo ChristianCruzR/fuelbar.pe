@@ -1,6 +1,7 @@
 import {
   ITEM_PRESETS,
   STORAGE_KEY,
+  calculateFoodCostPerPax,
   calculateCostScenario,
   calculateItem,
   calculateQuote,
@@ -10,8 +11,8 @@ import {
   formatDate,
   formatTime,
   quoteFilename,
-} from "./quote-core.js?v=4";
-import { createQuotePdfBlob } from "./pdf-export.js?v=4";
+} from "./quote-core.js?v=5";
+import { createQuotePdfBlob } from "./pdf-export.js?v=5";
 
 const dom = {
   saveStatus: document.querySelector("#save-status"),
@@ -294,11 +295,14 @@ function normalizeState(candidate) {
   if (normalized.costing.priceOptions.length !== 3) normalized.costing.priceOptions = defaultCosting.priceOptions;
   if (normalized.costing.consumptionOptions.length !== 3) normalized.costing.consumptionOptions = defaultCosting.consumptionOptions;
   normalized.costing.priceOptions = normalized.costing.priceOptions.map((value) => Math.max(0, finiteNumber(value)));
-  normalized.costing.consumptionOptions = normalized.costing.consumptionOptions.map((option, index) => ({
-    id: option.id || `consumption-${index + 1}`,
-    drinksPerPax: Math.max(0, finiteNumber(option.drinksPerPax)),
-    foodCostPerPax: Math.max(0, finiteNumber(option.foodCostPerPax)),
-  }));
+  normalized.costing.consumptionOptions = normalized.costing.consumptionOptions.map((option, index) => {
+    const drinksPerPax = Math.max(0, finiteNumber(option.drinksPerPax));
+    return {
+      id: option.id || `consumption-${index + 1}`,
+      drinksPerPax,
+      foodCostPerPax: calculateFoodCostPerPax(drinksPerPax),
+    };
+  });
   normalized.costing.selectedPriceIndex = clampOptionIndex(normalized.costing.selectedPriceIndex, 1);
   normalized.costing.selectedConsumptionIndex = clampOptionIndex(normalized.costing.selectedConsumptionIndex, 1);
   delete normalized.costing.scenarios;
@@ -405,7 +409,10 @@ function wireEvents() {
       const index = Number(target.dataset.consumptionIndex);
       const option = state.costing.consumptionOptions[index];
       if (!option) return;
-      option[target.dataset.consumptionField] = Math.max(0, readInputValue(target));
+      option.drinksPerPax = Math.max(0, readInputValue(target));
+      option.foodCostPerPax = calculateFoodCostPerPax(option.drinksPerPax);
+      const foodCostField = document.querySelector(`[data-consumption-cost="${index}"]`);
+      if (foodCostField) foodCostField.value = option.foodCostPerPax;
       markDirty();
       refreshCostCalculator();
       return;
@@ -516,7 +523,7 @@ function renderCostingEditor() {
     <div class="consumption-option">
       <span class="scenario-pill">Probabilidad ${index + 1}</span>
       <label class="field">Bebidas por pax<input type="number" min="0" step="1" data-consumption-index="${index}" data-consumption-field="drinksPerPax" value="${escapeAttribute(option.drinksPerPax)}" /></label>
-      <label class="field">Food cost por pax<input type="number" min="0" step="0.00001" data-consumption-index="${index}" data-consumption-field="foodCostPerPax" value="${escapeAttribute(option.foodCostPerPax)}" /></label>
+      <label class="field">Food cost por pax<input type="number" min="0" step="0.00001" data-consumption-cost="${index}" value="${escapeAttribute(option.foodCostPerPax)}" readonly aria-readonly="true" /><span class="field-help">Calculado automáticamente</span></label>
     </div>`).join("");
 
   dom.costingEditor.innerHTML = `

@@ -4,7 +4,7 @@ import {
   formatCurrency,
   formatDate,
   formatTime,
-} from "./quote-core.js?v=4";
+} from "./quote-core.js?v=5";
 
 const PAGE_WIDTH = 612;
 const PAGE_HEIGHT = 792;

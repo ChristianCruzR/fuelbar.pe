@@ -5,7 +5,7 @@ Aplicación web estática para preparar cotizaciones de FuelBar, comparar escena
 ## Funciones incluidas
 
 - Datos editables de FuelBar, cliente y evento.
-- Calculadora 3 × 3 con tres precios y tres probabilidades de consumo por pax.
+- Calculadora 3 × 3 con tres precios y tres probabilidades de consumo por pax; el food cost se recalcula automáticamente al cambiar las bebidas.
 - Utilidad y margen calculados sobre la venta sin IGV; el impuesto se muestra por separado.
 - Aplicación directa de la combinación elegida al artículo Barra Libre.
 - Artículos preconfigurados y artículos nuevos ilimitados.
