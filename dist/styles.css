@@ -192,7 +192,7 @@ button:disabled {
 
 .editor-tabs {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   padding: 14px 18px 0;
   background: #fff;
   border-bottom: 1px solid var(--line);
@@ -706,6 +706,252 @@ button:disabled {
 
 .selected-cost-summary .button {
   width: 100%;
+}
+
+.derived-cost-field {
+  align-content: start;
+  padding: 11px;
+  border: 1px solid #ccd5dd;
+  border-radius: 9px;
+  background: #edf8f9;
+}
+
+.derived-cost-value {
+  color: var(--navy-900);
+  font-size: 21px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.model-link {
+  justify-self: start;
+  padding: 2px 0;
+}
+
+.import-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px 16px;
+  border-color: #b8dce0;
+  background: linear-gradient(135deg, #fff, #f0fafb);
+}
+
+.import-card h3 {
+  margin: 4px 0 5px;
+}
+
+.import-card > div > p:last-child,
+.model-help,
+.empty-model-message {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+.file-button {
+  display: inline-grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.import-status {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 9px 10px;
+  color: #385b60;
+  background: #e3f5f6;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.import-status.is-error {
+  color: #784b00;
+  background: #fff4d6;
+}
+
+.cost-model-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.model-summary-cell {
+  min-width: 0;
+  padding: 11px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: #fff;
+}
+
+.model-summary-cell span,
+.model-summary-cell small {
+  display: block;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.model-summary-cell strong {
+  display: block;
+  margin: 4px 0 2px;
+  overflow: hidden;
+  color: var(--navy-900);
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-summary-cell.is-valid {
+  border-color: #a8ddc3;
+  background: #f0fbf6;
+}
+
+.model-summary-cell.is-warning {
+  border-color: #f0d28c;
+  background: #fff9e9;
+}
+
+.model-editor-card {
+  padding: 16px;
+}
+
+.model-editor-card .card-heading-row {
+  align-items: flex-start;
+}
+
+.model-editor-card .card-heading-row .eyebrow {
+  margin-bottom: 4px;
+  color: var(--blue-600);
+}
+
+.model-help {
+  margin: -3px 0 12px;
+}
+
+.model-table,
+.beverage-editor,
+.ingredient-list {
+  display: grid;
+  gap: 9px;
+}
+
+.model-row {
+  position: relative;
+  display: grid;
+  gap: 8px;
+  padding: 11px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: #f8fafb;
+}
+
+.fixed-cost-row {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding-right: 51px;
+}
+
+.fixed-cost-row .model-name {
+  grid-column: 1 / -1;
+}
+
+.fixed-cost-row .model-row-actions {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  display: grid;
+}
+
+.model-row .field {
+  gap: 4px;
+  font-size: 11px;
+}
+
+.model-row .field input,
+.beverage-heading .field input {
+  min-height: 39px;
+  padding: 8px 9px;
+  font-size: 14px;
+}
+
+.beverage-card {
+  overflow: hidden;
+  border: 1px solid #ccd7df;
+  border-radius: 13px;
+  background: #fff;
+}
+
+.beverage-heading {
+  display: grid;
+  grid-template-columns: auto 104px minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+  padding: 12px;
+  background: #eef7f8;
+  border-bottom: 1px solid var(--line);
+}
+
+.beverage-heading .item-number {
+  align-self: center;
+}
+
+.beverage-heading .field {
+  font-size: 11px;
+}
+
+.ingredient-list {
+  padding: 10px;
+}
+
+.ingredient-row {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding-right: 48px;
+}
+
+.ingredient-row .model-name {
+  grid-column: 1 / -1;
+}
+
+.ingredient-remove {
+  position: absolute;
+  top: 8px;
+  right: 7px;
+}
+
+.beverage-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--line);
+  background: #fbfcfd;
+}
+
+.beverage-footer p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.beverage-footer strong {
+  color: var(--navy-900);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.empty-model-message {
+  padding: 12px;
+  border: 1px dashed #bdc9d3;
+  border-radius: 9px;
+  text-align: center;
 }
 
 .item-card {
@@ -1312,6 +1558,16 @@ button:disabled {
     padding-inline: 8px;
   }
 
+  .tab-button {
+    min-width: 0;
+    padding-inline: 4px;
+    font-size: 12px;
+  }
+
+  .tab-count {
+    display: none;
+  }
+
   .editor-scroll,
   .preview-panel {
     padding: 15px;
@@ -1333,6 +1589,25 @@ button:disabled {
   .price-options,
   .consumption-option {
     grid-template-columns: 1fr;
+  }
+
+  .import-card,
+  .cost-model-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .import-card .file-button,
+  .import-status {
+    grid-column: auto;
+  }
+
+  .beverage-heading {
+    grid-template-columns: auto 95px minmax(0, 1fr);
+  }
+
+  .beverage-heading .inline-actions {
+    grid-column: 1 / -1;
+    justify-self: end;
   }
 
   .consumption-option .scenario-pill {

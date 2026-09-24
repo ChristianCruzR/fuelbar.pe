@@ -8,9 +8,9 @@
     <title>Cotizador FuelBar</title>
     <link rel="icon" type="image/png" href="./assets/fuelbar-logo.png" />
     <link rel="apple-touch-icon" href="./assets/fuelbar-logo.png" />
-    <link rel="stylesheet" href="./styles.css?v=7" />
+    <link rel="stylesheet" href="./styles.css?v=8" />
     <script defer src="./vendor/pdf-lib.min.js?v=1"></script>
-    <script type="module" src="./app.js?v=9"></script>
+    <script type="module" src="./app.js?v=10"></script>
   </head>
   <body>
     <header class="app-header">
@@ -34,6 +34,7 @@
         <nav class="editor-tabs" aria-label="Secciones del editor" role="tablist">
           <button class="tab-button is-active" id="tab-data" data-tab="data" role="tab" aria-selected="true" aria-controls="panel-data">Datos</button>
           <button class="tab-button" id="tab-costing" data-tab="costing" role="tab" aria-selected="false" aria-controls="panel-costing" tabindex="-1">Calculadora</button>
+          <button class="tab-button" id="tab-cost-model" data-tab="cost-model" role="tab" aria-selected="false" aria-controls="panel-cost-model" tabindex="-1">Costos</button>
           <button class="tab-button" id="tab-items" data-tab="items" role="tab" aria-selected="false" aria-controls="panel-items" tabindex="-1">Artículos <span id="item-count" class="tab-count">4</span></button>
           <button class="tab-button" id="tab-terms" data-tab="terms" role="tab" aria-selected="false" aria-controls="panel-terms" tabindex="-1">Condiciones</button>
         </nav>
@@ -117,14 +118,11 @@
             <div class="form-card">
               <h3>Supuestos compartidos</h3>
               <div class="field-grid cols-2">
-                <div class="field">
-                  <div class="field-label-row">
-                    <label for="fixed-cost-input">Costos fijos operativos</label>
-                    <button class="text-button field-action" type="button" data-cost-action="restore-fixed-cost">Usar S/ 3,340</button>
-                  </div>
-                  <input id="fixed-cost-input" type="number" min="0" step="0.01" data-bind="costing.fixedCost" aria-describedby="fixed-cost-help" />
-                  <span class="field-help" id="fixed-cost-help">Es el total de la hoja «Costeo Fijo». El monto bruto antes del descuento se calcula con precio × pax.</span>
-                  <span class="field-warning" id="fixed-cost-warning" role="status" hidden></span>
+                <div class="field derived-cost-field">
+                  <span>Costos fijos operativos</span>
+                  <output id="fixed-cost-total" class="derived-cost-value">S/ 4,940.00</output>
+                  <span class="field-help">Suma automática de las partidas configuradas en Costos.</span>
+                  <button class="text-button model-link" type="button" data-cost-action="open-cost-model">Editar costos fijos</button>
                 </div>
                 <label class="field">Descuento publicidad (%)<input type="number" min="0" max="100" step="0.01" data-bind="costing.advertisingDiscount" /></label>
                 <label class="field span-2">Cobro adicional<input type="number" min="0" step="0.01" data-bind="costing.additionalCharge" /></label>
@@ -132,6 +130,55 @@
             </div>
 
             <div id="costing-editor" class="costing-grid"></div>
+          </section>
+
+          <section class="tab-panel" id="panel-cost-model" role="tabpanel" aria-labelledby="tab-cost-model" hidden>
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Modelo operativo</p>
+                <h2>Costos e insumos</h2>
+              </div>
+              <button class="text-button" type="button" data-model-action="reset-model">Restaurar modelo</button>
+            </div>
+
+            <p class="section-note">Edita los datos en esta página o importa el libro modelo. Todo cambio actualiza automáticamente el Food Cost por pax y la matriz de utilidad.</p>
+
+            <article class="form-card import-card">
+              <div>
+                <p class="eyebrow">Importación local</p>
+                <h3>Subir Costeos_FB.xlsx</h3>
+                <p>Debe conservar las hojas «Costeo Fijo» y «Costeo Bebidas». El archivo se procesa únicamente en este navegador.</p>
+              </div>
+              <label class="button button-secondary file-button" for="costing-file-input">Elegir Excel</label>
+              <input class="sr-only" id="costing-file-input" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+              <p id="costing-import-status" class="import-status" role="status" aria-live="polite">Modelo oficial cargado como valor inicial.</p>
+            </article>
+
+            <div id="costing-model-summary" class="cost-model-summary" aria-label="Resumen del modelo de costos"></div>
+
+            <article class="form-card model-editor-card">
+              <div class="card-heading-row">
+                <div>
+                  <p class="eyebrow">Costeo Fijo</p>
+                  <h3>Partidas de costos fijos</h3>
+                </div>
+                <button class="text-button" type="button" data-model-action="fixed-add">Añadir partida</button>
+              </div>
+              <p class="model-help">Al cambiar cantidad o precio unitario, el precio total se recalcula. También puedes escribir un total directamente.</p>
+              <div id="fixed-costs-editor" class="model-table"></div>
+            </article>
+
+            <article class="form-card model-editor-card beverage-editor-card">
+              <div class="card-heading-row">
+                <div>
+                  <p class="eyebrow">Costeo Bebidas</p>
+                  <h3>Consumo, cócteles e insumos</h3>
+                </div>
+                <button class="text-button" type="button" data-model-action="beverage-add">Añadir cóctel</button>
+              </div>
+              <p class="model-help">Los porcentajes de consumo deben sumar 100%. El costo de cada cóctel es la suma de sus insumos.</p>
+              <div id="beverage-editor" class="beverage-editor"></div>
+            </article>
           </section>
 
           <section class="tab-panel" id="panel-items" role="tabpanel" aria-labelledby="tab-items" hidden>

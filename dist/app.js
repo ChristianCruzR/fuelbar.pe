@@ -1,7 +1,6 @@
 import {
   ITEM_PRESETS,
   STORAGE_KEY,
-  calculateFoodCostPerPax,
   calculateCostScenario,
   calculateItem,
   calculateQuote,
@@ -13,9 +12,21 @@ import {
   quoteFilename,
 } from "./quote-core.js?v=6";
 import { createQuotePdfBlob } from "./pdf-export.js?v=6";
-
-const EXCEL_FIXED_COST = cloneDefaultState().costing.fixedCost;
-const COSTING_MODEL_REVISION = 2;
+import {
+  COSTING_MODEL_REVISION,
+  calculateCocktailCost,
+  calculateConsumptionPercentTotal,
+  calculateFixedCostTotal,
+  calculateFoodCostFromProfiles,
+  calculateWeightedDrinkCost,
+  cloneCostingModelDefaults,
+  formatEditableNumber,
+  normalizeBeverageProfiles,
+  normalizeFixedCostItems,
+  parseBeverageRows,
+  parseFixedCostRows,
+  recalculateIngredient,
+} from "./costing-model.js?v=1";
 
 const dom = {
   saveStatus: document.querySelector("#save-status"),
@@ -32,6 +43,12 @@ const dom = {
   previewSummary: document.querySelector("#preview-summary"),
   itemsEditor: document.querySelector("#items-editor"),
   costingEditor: document.querySelector("#costing-editor"),
+  fixedCostTotal: document.querySelector("#fixed-cost-total"),
+  costingFileInput: document.querySelector("#costing-file-input"),
+  costingImportStatus: document.querySelector("#costing-import-status"),
+  costingModelSummary: document.querySelector("#costing-model-summary"),
+  fixedCostsEditor: document.querySelector("#fixed-costs-editor"),
+  beverageEditor: document.querySelector("#beverage-editor"),
   termsEditor: document.querySelector("#terms-editor"),
   servicesEditor: document.querySelector("#services-editor"),
   itemCount: document.querySelector("#item-count"),
@@ -51,6 +68,7 @@ function initialize() {
   populateBoundFields();
   renderItemsEditor();
   renderCostingEditor();
+  renderCostModelEditor();
   renderOrderedEditors();
   renderPreview();
   wireEvents();
@@ -298,28 +316,60 @@ function normalizeState(candidate) {
   if (normalized.costing.priceOptions.length !== 3) normalized.costing.priceOptions = defaultCosting.priceOptions;
   if (normalized.costing.consumptionOptions.length !== 3) normalized.costing.consumptionOptions = defaultCosting.consumptionOptions;
   normalized.costing.priceOptions = normalized.costing.priceOptions.map((value) => Math.max(0, finiteNumber(value)));
+  const modelDefaults = cloneCostingModelDefaults();
+  if (Array.isArray(normalized.costing.fixedCostItems)) {
+    normalized.costing.fixedCostItems = normalizeFixedCostItems(normalized.costing.fixedCostItems);
+  } else {
+    const legacyFixedCost = Math.max(0, finiteNumber(normalized.costing.fixedCost, defaultCosting.fixedCost));
+    const legacyWasStandard = Math.abs(legacyFixedCost - finiteNumber(defaultCosting.fixedCost)) < 0.01;
+    const pax = Math.max(0, finiteNumber(normalized.event?.pax));
+    const additionalCharge = Math.max(0, finiteNumber(normalized.costing.additionalCharge));
+    const legacyWasGrossAmount = normalized.costing.priceOptions.some((price) => (
+      legacyFixedCost > 0
+      && Math.abs(legacyFixedCost - (pax * Math.max(0, finiteNumber(price)) + additionalCharge)) < 0.01
+    ));
+    normalized.costing.fixedCostItems = normalizeFixedCostItems(
+      legacyWasStandard || legacyWasGrossAmount
+        ? modelDefaults.fixedCostItems
+        : [{
+            id: "fixed-cost-migrated",
+            name: "Costo fijo migrado",
+            quantity: 1,
+            unitPrice: legacyFixedCost,
+            total: legacyFixedCost,
+          }],
+    );
+  }
+  normalized.costing.beverageProfiles = normalizeBeverageProfiles(
+    Array.isArray(normalized.costing.beverageProfiles)
+      ? normalized.costing.beverageProfiles
+      : modelDefaults.beverageProfiles,
+  );
+  normalized.costing.fixedCost = calculateFixedCostTotal(normalized.costing.fixedCostItems);
   normalized.costing.consumptionOptions = normalized.costing.consumptionOptions.map((option, index) => {
     const drinksPerPax = Math.max(0, finiteNumber(option.drinksPerPax));
     return {
       id: option.id || `consumption-${index + 1}`,
       drinksPerPax,
-      foodCostPerPax: calculateFoodCostPerPax(drinksPerPax),
+      foodCostPerPax: calculateFoodCostFromProfiles(drinksPerPax, normalized.costing.beverageProfiles),
     };
   });
-  const costingRevision = Math.max(0, finiteNumber(normalized.costing.modelRevision));
-  const pax = Math.max(0, finiteNumber(normalized.event?.pax));
-  const additionalCharge = Math.max(0, finiteNumber(normalized.costing.additionalCharge));
-  const fixedCostMatchesGrossAmount = normalized.costing.priceOptions.some((price) => (
-    Math.abs(finiteNumber(normalized.costing.fixedCost) - (pax * price + additionalCharge)) < 0.01
-  ));
-  if (costingRevision < COSTING_MODEL_REVISION && fixedCostMatchesGrossAmount) {
-    normalized.costing.fixedCost = defaultCosting.fixedCost;
-  }
   normalized.costing.modelRevision = COSTING_MODEL_REVISION;
   normalized.costing.selectedPriceIndex = clampOptionIndex(normalized.costing.selectedPriceIndex, 1);
   normalized.costing.selectedConsumptionIndex = clampOptionIndex(normalized.costing.selectedConsumptionIndex, 1);
   delete normalized.costing.scenarios;
   return normalized;
+}
+
+function syncCostingModel() {
+  state.costing.fixedCost = calculateFixedCostTotal(state.costing.fixedCostItems);
+  state.costing.consumptionOptions.forEach((option) => {
+    option.foodCostPerPax = calculateFoodCostFromProfiles(
+      option.drinksPerPax,
+      state.costing.beverageProfiles,
+    );
+  });
+  state.costing.modelRevision = COSTING_MODEL_REVISION;
 }
 
 function clampOptionIndex(value, fallback) {
@@ -423,11 +473,24 @@ function wireEvents() {
       const option = state.costing.consumptionOptions[index];
       if (!option) return;
       option.drinksPerPax = Math.max(0, readInputValue(target));
-      option.foodCostPerPax = calculateFoodCostPerPax(option.drinksPerPax);
+      option.foodCostPerPax = calculateFoodCostFromProfiles(
+        option.drinksPerPax,
+        state.costing.beverageProfiles,
+      );
       const foodCostField = document.querySelector(`[data-consumption-cost="${index}"]`);
       if (foodCostField) foodCostField.value = option.foodCostPerPax;
       markDirty();
       refreshCostCalculator();
+      return;
+    }
+
+    if (target.matches("[data-fixed-cost-field]")) {
+      handleFixedCostInput(target);
+      return;
+    }
+
+    if (target.matches("[data-beverage-field], [data-ingredient-field]")) {
+      handleBeverageInput(target);
       return;
     }
 
@@ -455,6 +518,10 @@ function wireEvents() {
 
   document.addEventListener("change", (event) => {
     const target = event.target;
+    if (target === dom.costingFileInput) {
+      void importCostingWorkbook(target.files?.[0]);
+      return;
+    }
     if (target.matches("[data-bind]")) {
       setByPath(state, target.dataset.bind, readInputValue(target));
       markDirty();
@@ -463,6 +530,7 @@ function wireEvents() {
       if (target.dataset.bind === "quote.currency") {
         renderItemsEditor();
         renderCostingEditor();
+        renderCostModelEditor();
       }
       if (["event.pax", "quote.taxRate"].includes(target.dataset.bind) || target.dataset.bind.startsWith("costing.")) {
         refreshCostCalculator();
@@ -509,9 +577,12 @@ function wireEvents() {
     if (costAction?.dataset.costAction === "apply-selected") {
       applyCostCombination(state.costing.selectedPriceIndex, state.costing.selectedConsumptionIndex);
     }
-    if (costAction?.dataset.costAction === "restore-fixed-cost") {
-      restoreFixedCostFromExcel();
+    if (costAction?.dataset.costAction === "open-cost-model") {
+      activateTab("cost-model");
     }
+
+    const modelAction = event.target.closest("[data-model-action]");
+    if (modelAction) handleCostModelAction(modelAction);
   });
 
   dom.addItemButton.addEventListener("click", addSelectedItem);
@@ -565,12 +636,263 @@ function renderCostingEditor() {
   refreshCostCalculator();
 }
 
+function renderCostModelEditor() {
+  if (!dom.fixedCostsEditor || !dom.beverageEditor) return;
+  dom.fixedCostsEditor.innerHTML = state.costing.fixedCostItems.map((item, index) => `
+    <div class="model-row fixed-cost-row">
+      <label class="field model-name"><span>Concepto</span><input data-fixed-cost-index="${index}" data-fixed-cost-field="name" value="${escapeAttribute(item.name)}" /></label>
+      <label class="field"><span>Cantidad</span><input type="number" min="0" step="0.01" data-fixed-cost-index="${index}" data-fixed-cost-field="quantity" value="${escapeAttribute(formatEditableNumber(item.quantity))}" /></label>
+      <label class="field"><span>Precio unitario</span><input type="number" min="0" step="0.01" data-fixed-cost-index="${index}" data-fixed-cost-field="unitPrice" value="${escapeAttribute(formatEditableNumber(item.unitPrice))}" /></label>
+      <label class="field"><span>Precio total</span><input type="number" min="0" step="0.01" data-fixed-cost-index="${index}" data-fixed-cost-field="total" value="${escapeAttribute(formatEditableNumber(item.total))}" /></label>
+      <div class="inline-actions model-row-actions" aria-label="Acciones de ${escapeAttribute(item.name || `costo ${index + 1}`)}">
+        <button class="icon-button" type="button" data-model-action="fixed-up" data-fixed-cost-index="${index}" aria-label="Subir costo" ${index === 0 ? "disabled" : ""}>↑</button>
+        <button class="icon-button" type="button" data-model-action="fixed-down" data-fixed-cost-index="${index}" aria-label="Bajar costo" ${index === state.costing.fixedCostItems.length - 1 ? "disabled" : ""}>↓</button>
+        <button class="icon-button danger" type="button" data-model-action="fixed-remove" data-fixed-cost-index="${index}" aria-label="Eliminar costo">×</button>
+      </div>
+    </div>`).join("");
+
+  dom.beverageEditor.innerHTML = state.costing.beverageProfiles.map((profile, profileIndex) => {
+    const ingredientRows = profile.ingredients.map((ingredient, ingredientIndex) => `
+      <div class="model-row ingredient-row">
+        <label class="field model-name"><span>Insumo</span><input data-profile-index="${profileIndex}" data-ingredient-index="${ingredientIndex}" data-ingredient-field="name" value="${escapeAttribute(ingredient.name)}" /></label>
+        <label class="field"><span>Cantidad</span><input type="number" min="0" step="any" data-profile-index="${profileIndex}" data-ingredient-index="${ingredientIndex}" data-ingredient-field="quantity" value="${escapeAttribute(formatEditableNumber(ingredient.quantity))}" /></label>
+        <label class="field"><span>Unidad</span><input data-profile-index="${profileIndex}" data-ingredient-index="${ingredientIndex}" data-ingredient-field="unit" value="${escapeAttribute(ingredient.unit)}" /></label>
+        <label class="field"><span>Precio base</span><input type="number" min="0" step="any" data-profile-index="${profileIndex}" data-ingredient-index="${ingredientIndex}" data-ingredient-field="basePrice" value="${escapeAttribute(formatEditableNumber(ingredient.basePrice))}" /></label>
+        <label class="field"><span>Precio por cóctel</span><input type="number" min="0" step="any" data-profile-index="${profileIndex}" data-ingredient-index="${ingredientIndex}" data-ingredient-field="lineCost" value="${escapeAttribute(formatEditableNumber(ingredient.lineCost))}" /></label>
+        <button class="icon-button danger ingredient-remove" type="button" data-model-action="ingredient-remove" data-profile-index="${profileIndex}" data-ingredient-index="${ingredientIndex}" aria-label="Eliminar insumo">×</button>
+      </div>`).join("");
+    return `
+      <article class="beverage-card">
+        <div class="beverage-heading">
+          <span class="item-number">${profileIndex + 1}</span>
+          <label class="field beverage-percent"><span>Consumo (%)</span><input type="number" min="0" step="0.01" data-profile-index="${profileIndex}" data-beverage-field="consumptionPercent" value="${escapeAttribute(formatEditableNumber(profile.consumptionPercent))}" /></label>
+          <label class="field beverage-name"><span>Cóctel</span><input data-profile-index="${profileIndex}" data-beverage-field="name" value="${escapeAttribute(profile.name)}" /></label>
+          <div class="inline-actions" aria-label="Acciones de ${escapeAttribute(profile.name || `cóctel ${profileIndex + 1}`)}">
+            <button class="icon-button" type="button" data-model-action="beverage-up" data-profile-index="${profileIndex}" aria-label="Subir cóctel" ${profileIndex === 0 ? "disabled" : ""}>↑</button>
+            <button class="icon-button" type="button" data-model-action="beverage-down" data-profile-index="${profileIndex}" aria-label="Bajar cóctel" ${profileIndex === state.costing.beverageProfiles.length - 1 ? "disabled" : ""}>↓</button>
+            <button class="icon-button danger" type="button" data-model-action="beverage-remove" data-profile-index="${profileIndex}" aria-label="Eliminar cóctel">×</button>
+          </div>
+        </div>
+        <div class="ingredient-list">${ingredientRows || '<p class="empty-model-message">Añade al menos un insumo para calcular este cóctel.</p>'}</div>
+        <div class="beverage-footer">
+          <button class="text-button" type="button" data-model-action="ingredient-add" data-profile-index="${profileIndex}">Añadir insumo</button>
+          <p>Costo del cóctel <strong data-cocktail-total="${profileIndex}">${formatCurrency(calculateCocktailCost(profile), state.quote.currency)}</strong></p>
+        </div>
+      </article>`;
+  }).join("");
+  if (!state.costing.beverageProfiles.length) {
+    dom.beverageEditor.innerHTML = '<p class="empty-model-message">Añade un cóctel para calcular el Food Cost por pax.</p>';
+  }
+  updateCostModelOutputs();
+}
+
+function updateCostModelOutputs(changedProfileIndex = null) {
+  syncCostingModel();
+  const currency = state.quote.currency;
+  const fixedTotal = state.costing.fixedCost;
+  const percentTotal = calculateConsumptionPercentTotal(state.costing.beverageProfiles);
+  const weightedCost = calculateWeightedDrinkCost(state.costing.beverageProfiles);
+  const percentagesValid = Math.abs(percentTotal - 100) <= 0.01;
+
+  if (dom.costingModelSummary) {
+    dom.costingModelSummary.innerHTML = `
+      <div class="model-summary-cell"><span>Costos fijos</span><strong>${formatCurrency(fixedTotal, currency)}</strong></div>
+      <div class="model-summary-cell ${percentagesValid ? "is-valid" : "is-warning"}"><span>Porcentajes</span><strong>${formatEditableNumber(percentTotal, 2)}%</strong><small>${percentagesValid ? "Distribución completa" : "Debe sumar 100%"}</small></div>
+      <div class="model-summary-cell"><span>Costo ponderado / bebida</span><strong>${formatDetailedCurrency(weightedCost, currency)}</strong></div>`;
+  }
+  if (dom.fixedCostTotal) dom.fixedCostTotal.textContent = formatCurrency(fixedTotal, currency);
+  if (changedProfileIndex !== null) {
+    const cocktailTotal = document.querySelector(`[data-cocktail-total="${changedProfileIndex}"]`);
+    if (cocktailTotal && state.costing.beverageProfiles[changedProfileIndex]) {
+      cocktailTotal.textContent = formatCurrency(
+        calculateCocktailCost(state.costing.beverageProfiles[changedProfileIndex]),
+        currency,
+      );
+    }
+  }
+  state.costing.consumptionOptions.forEach((option, index) => {
+    const input = document.querySelector(`[data-consumption-cost="${index}"]`);
+    if (input) input.value = formatEditableNumber(option.foodCostPerPax, 5);
+  });
+  refreshCostCalculator();
+}
+
+function handleFixedCostInput(target) {
+  const index = Number(target.dataset.fixedCostIndex);
+  const item = state.costing.fixedCostItems[index];
+  if (!item) return;
+  const field = target.dataset.fixedCostField;
+  if (field === "name") item.name = target.value;
+  else item[field] = Math.max(0, readInputValue(target));
+
+  if (field === "quantity" || field === "unitPrice") {
+    item.total = item.quantity * item.unitPrice;
+    const totalInput = document.querySelector(`[data-fixed-cost-index="${index}"][data-fixed-cost-field="total"]`);
+    if (totalInput) totalInput.value = formatEditableNumber(item.total);
+  }
+  markDirty();
+  updateCostModelOutputs();
+}
+
+function handleBeverageInput(target) {
+  const profileIndex = Number(target.dataset.profileIndex);
+  const profile = state.costing.beverageProfiles[profileIndex];
+  if (!profile) return;
+
+  if (target.matches("[data-beverage-field]")) {
+    const field = target.dataset.beverageField;
+    profile[field] = field === "name" ? target.value : Math.max(0, readInputValue(target));
+  } else {
+    const ingredientIndex = Number(target.dataset.ingredientIndex);
+    const ingredient = profile.ingredients[ingredientIndex];
+    if (!ingredient) return;
+    const field = target.dataset.ingredientField;
+    if (field === "name" || field === "unit") ingredient[field] = target.value;
+    else ingredient[field] = Math.max(0, readInputValue(target));
+    if (field === "quantity" || field === "basePrice") {
+      recalculateIngredient(ingredient);
+      const lineCostInput = document.querySelector(`[data-profile-index="${profileIndex}"][data-ingredient-index="${ingredientIndex}"][data-ingredient-field="lineCost"]`);
+      if (lineCostInput) lineCostInput.value = formatEditableNumber(ingredient.lineCost);
+    }
+  }
+  markDirty();
+  updateCostModelOutputs(profileIndex);
+}
+
+function handleCostModelAction(button) {
+  const action = button.dataset.modelAction;
+  const fixedIndex = Number(button.dataset.fixedCostIndex);
+  const profileIndex = Number(button.dataset.profileIndex);
+  const ingredientIndex = Number(button.dataset.ingredientIndex);
+
+  if (action === "fixed-add") {
+    state.costing.fixedCostItems.push({ id: createId(), name: "Nuevo costo", quantity: 1, unitPrice: 0, total: 0 });
+  } else if (action === "fixed-up" && fixedIndex > 0) {
+    swapItems(state.costing.fixedCostItems, fixedIndex, fixedIndex - 1);
+  } else if (action === "fixed-down" && fixedIndex < state.costing.fixedCostItems.length - 1) {
+    swapItems(state.costing.fixedCostItems, fixedIndex, fixedIndex + 1);
+  } else if (action === "fixed-remove" && state.costing.fixedCostItems[fixedIndex]) {
+    state.costing.fixedCostItems.splice(fixedIndex, 1);
+  } else if (action === "beverage-add") {
+    state.costing.beverageProfiles.push({
+      id: createId(),
+      name: "Nuevo cóctel",
+      consumptionPercent: 0,
+      ingredients: [],
+    });
+  } else if (action === "beverage-up" && profileIndex > 0) {
+    swapItems(state.costing.beverageProfiles, profileIndex, profileIndex - 1);
+  } else if (action === "beverage-down" && profileIndex < state.costing.beverageProfiles.length - 1) {
+    swapItems(state.costing.beverageProfiles, profileIndex, profileIndex + 1);
+  } else if (action === "beverage-remove" && state.costing.beverageProfiles[profileIndex]) {
+    state.costing.beverageProfiles.splice(profileIndex, 1);
+  } else if (action === "ingredient-add" && state.costing.beverageProfiles[profileIndex]) {
+    state.costing.beverageProfiles[profileIndex].ingredients.push({
+      id: createId(),
+      name: "Nuevo insumo",
+      quantity: 1,
+      unit: "unidad",
+      basePrice: 0,
+      lineCost: 0,
+    });
+  } else if (action === "ingredient-remove" && state.costing.beverageProfiles[profileIndex]?.ingredients[ingredientIndex]) {
+    state.costing.beverageProfiles[profileIndex].ingredients.splice(ingredientIndex, 1);
+  } else if (action === "reset-model") {
+    if (!window.confirm("¿Restaurar los costos y bebidas del modelo oficial de Excel?")) return;
+    const defaults = cloneCostingModelDefaults();
+    state.costing.fixedCostItems = normalizeFixedCostItems(defaults.fixedCostItems);
+    state.costing.beverageProfiles = normalizeBeverageProfiles(defaults.beverageProfiles);
+    setCostingImportStatus("Modelo oficial restaurado.", false);
+  } else {
+    return;
+  }
+
+  syncCostingModel();
+  markDirty();
+  renderCostModelEditor();
+  renderCostingEditor();
+}
+
+function swapItems(list, from, to) {
+  [list[from], list[to]] = [list[to], list[from]];
+}
+
+async function importCostingWorkbook(file) {
+  if (!file) return;
+  if (!file.name.toLocaleLowerCase("es").endsWith(".xlsx")) {
+    setCostingImportStatus("Selecciona un archivo .xlsx basado en el modelo Costeos_FB.", true);
+    dom.costingFileInput.value = "";
+    return;
+  }
+  if (file.size > 8 * 1024 * 1024) {
+    setCostingImportStatus("El archivo supera el límite de 8 MB.", true);
+    dom.costingFileInput.value = "";
+    return;
+  }
+
+  setCostingImportStatus(`Leyendo ${file.name}…`, false);
+  dom.costingFileInput.disabled = true;
+  try {
+    const XLSX = await import("./vendor/xlsx.mjs?v=0.20.3");
+    const workbook = XLSX.read(await file.arrayBuffer(), { dense: true, cellFormula: true });
+    const requiredSheets = ["Costeo Fijo", "Costeo Bebidas"];
+    const missingSheets = requiredSheets.filter((name) => !workbook.SheetNames.includes(name));
+    if (missingSheets.length) {
+      throw new Error(`Falta ${missingSheets.map((name) => `«${name}»`).join(" y ")}. Usa el libro modelo Costeos_FB.xlsx.`);
+    }
+    const fixedRows = XLSX.utils.sheet_to_json(workbook.Sheets["Costeo Fijo"], {
+      header: 1,
+      raw: true,
+      defval: null,
+      blankrows: true,
+    });
+    const beverageRows = XLSX.utils.sheet_to_json(workbook.Sheets["Costeo Bebidas"], {
+      header: 1,
+      raw: true,
+      defval: null,
+      blankrows: true,
+    });
+    if (fixedRows.length > 500 || beverageRows.length > 5000) {
+      throw new Error("El libro contiene demasiadas filas para este cotizador.");
+    }
+    const fixedResult = parseFixedCostRows(fixedRows);
+    const beverageResult = parseBeverageRows(beverageRows);
+    state.costing.fixedCostItems = normalizeFixedCostItems(fixedResult.items);
+    state.costing.beverageProfiles = normalizeBeverageProfiles(beverageResult.profiles);
+    syncCostingModel();
+    markDirty();
+    renderCostModelEditor();
+    renderCostingEditor();
+    const warnings = [...fixedResult.warnings, ...beverageResult.warnings];
+    setCostingImportStatus(
+      warnings.length
+        ? `Importación completa con ${warnings.length} aviso${warnings.length === 1 ? "" : "s"}: ${warnings.join(" ")}`
+        : `${file.name} importado: ${state.costing.fixedCostItems.length} costos y ${state.costing.beverageProfiles.length} cócteles.`,
+      warnings.length > 0,
+    );
+    showToast("Costos importados y calculadora actualizada");
+  } catch (error) {
+    console.error(error);
+    setCostingImportStatus(error?.message || "No se pudo leer el archivo.", true);
+    showToast("No se pudo importar el Excel", true);
+  } finally {
+    dom.costingFileInput.disabled = false;
+    dom.costingFileInput.value = "";
+  }
+}
+
+function setCostingImportStatus(message, isError) {
+  if (!dom.costingImportStatus) return;
+  dom.costingImportStatus.textContent = message;
+  dom.costingImportStatus.classList.toggle("is-error", Boolean(isError));
+}
+
 function refreshCostCalculator() {
   const matrix = document.querySelector("#cost-matrix");
   const summary = document.querySelector("#selected-cost-summary");
   if (!matrix || !summary) return;
   const formatter = (value) => formatCurrency(value, state.quote.currency);
-  refreshFixedCostGuidance(formatter);
+  if (dom.fixedCostTotal) dom.fixedCostTotal.textContent = formatter(state.costing.fixedCost);
   const selectedPrice = state.costing.selectedPriceIndex;
   const selectedConsumption = state.costing.selectedConsumptionIndex;
   const headerCells = state.costing.consumptionOptions.map((option) => `
@@ -619,29 +941,6 @@ function refreshCostCalculator() {
     <button class="button button-primary" type="button" data-cost-action="apply-selected">Aplicar ${formatter(price)} a Barra Libre</button>`;
 }
 
-function refreshFixedCostGuidance(formatter) {
-  const warning = document.querySelector("#fixed-cost-warning");
-  const input = document.querySelector('[data-bind="costing.fixedCost"]');
-  if (!warning || !input) return;
-
-  const fixedCost = Math.max(0, finiteNumber(state.costing.fixedCost));
-  const pax = Math.max(0, finiteNumber(state.event.pax));
-  const matchingPrice = state.costing.priceOptions.find((price) => (
-    fixedCost > 0 && Math.abs(fixedCost - pax * Math.max(0, finiteNumber(price))) < 0.01
-  ));
-
-  if (matchingPrice === undefined) {
-    warning.hidden = true;
-    warning.textContent = "";
-    input.setAttribute("aria-describedby", "fixed-cost-help");
-    return;
-  }
-
-  warning.textContent = `${formatter(fixedCost)} coincide con el monto bruto de ${formatter(matchingPrice)} × ${formatQuantity(pax)} pax. Ese monto ya lo calcula la matriz; aquí van solo los costos fijos operativos (${formatter(EXCEL_FIXED_COST)} en el Excel).`;
-  warning.hidden = false;
-  input.setAttribute("aria-describedby", "fixed-cost-help fixed-cost-warning");
-}
-
 function selectCostCombination(priceIndex, consumptionIndex) {
   if (!Number.isFinite(state.costing.priceOptions[priceIndex]) || !state.costing.consumptionOptions[consumptionIndex]) return;
   state.costing.selectedPriceIndex = priceIndex;
@@ -685,15 +984,6 @@ function applyCostCombination(priceIndex, consumptionIndex) {
   renderItemsEditor();
   renderPreview();
   showToast(`${formatCurrency(price, state.quote.currency)} y ${formatQuantity(consumption.drinksPerPax)} bebidas/pax aplicados`);
-}
-
-function restoreFixedCostFromExcel() {
-  state.costing.fixedCost = EXCEL_FIXED_COST;
-  const input = document.querySelector('[data-bind="costing.fixedCost"]');
-  if (input) input.value = String(EXCEL_FIXED_COST);
-  markDirty();
-  refreshCostCalculator();
-  showToast(`Costo fijo del Excel restaurado: ${formatCurrency(EXCEL_FIXED_COST, state.quote.currency)}`);
 }
 
 function activateTab(tabName) {
@@ -1012,6 +1302,7 @@ function resetDraft() {
   populateBoundFields();
   renderItemsEditor();
   renderCostingEditor();
+  renderCostModelEditor();
   renderOrderedEditors();
   renderPreview();
   setSaveStatus("Plantilla restablecida");
@@ -1118,6 +1409,15 @@ function formatQuantity(value) {
 function formatPercent(value) {
   const number = finiteNumber(value);
   return `${new Intl.NumberFormat("es-PE", { maximumFractionDigits: 2 }).format(number)}%`;
+}
+
+function formatDetailedCurrency(value, currency = "PEN") {
+  return new Intl.NumberFormat("es-PE", {
+    style: "currency",
+    currency: currency || "PEN",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 5,
+  }).format(finiteNumber(value));
 }
 
 function escapeHtml(value) {
