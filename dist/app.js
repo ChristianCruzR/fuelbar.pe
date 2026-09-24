@@ -11,8 +11,11 @@ import {
   formatDate,
   formatTime,
   quoteFilename,
-} from "./quote-core.js?v=5";
-import { createQuotePdfBlob } from "./pdf-export.js?v=5";
+} from "./quote-core.js?v=6";
+import { createQuotePdfBlob } from "./pdf-export.js?v=6";
+
+const EXCEL_FIXED_COST = cloneDefaultState().costing.fixedCost;
+const COSTING_MODEL_REVISION = 2;
 
 const dom = {
   saveStatus: document.querySelector("#save-status"),
@@ -303,6 +306,16 @@ function normalizeState(candidate) {
       foodCostPerPax: calculateFoodCostPerPax(drinksPerPax),
     };
   });
+  const costingRevision = Math.max(0, finiteNumber(normalized.costing.modelRevision));
+  const pax = Math.max(0, finiteNumber(normalized.event?.pax));
+  const additionalCharge = Math.max(0, finiteNumber(normalized.costing.additionalCharge));
+  const fixedCostMatchesGrossAmount = normalized.costing.priceOptions.some((price) => (
+    Math.abs(finiteNumber(normalized.costing.fixedCost) - (pax * price + additionalCharge)) < 0.01
+  ));
+  if (costingRevision < COSTING_MODEL_REVISION && fixedCostMatchesGrossAmount) {
+    normalized.costing.fixedCost = defaultCosting.fixedCost;
+  }
+  normalized.costing.modelRevision = COSTING_MODEL_REVISION;
   normalized.costing.selectedPriceIndex = clampOptionIndex(normalized.costing.selectedPriceIndex, 1);
   normalized.costing.selectedConsumptionIndex = clampOptionIndex(normalized.costing.selectedConsumptionIndex, 1);
   delete normalized.costing.scenarios;
@@ -496,6 +509,9 @@ function wireEvents() {
     if (costAction?.dataset.costAction === "apply-selected") {
       applyCostCombination(state.costing.selectedPriceIndex, state.costing.selectedConsumptionIndex);
     }
+    if (costAction?.dataset.costAction === "restore-fixed-cost") {
+      restoreFixedCostFromExcel();
+    }
   });
 
   dom.addItemButton.addEventListener("click", addSelectedItem);
@@ -554,6 +570,7 @@ function refreshCostCalculator() {
   const summary = document.querySelector("#selected-cost-summary");
   if (!matrix || !summary) return;
   const formatter = (value) => formatCurrency(value, state.quote.currency);
+  refreshFixedCostGuidance(formatter);
   const selectedPrice = state.costing.selectedPriceIndex;
   const selectedConsumption = state.costing.selectedConsumptionIndex;
   const headerCells = state.costing.consumptionOptions.map((option) => `
@@ -589,15 +606,40 @@ function refreshCostCalculator() {
       <span class="scenario-pill">${formatQuantity(state.event.pax)} pax</span>
     </div>
     <div class="cost-metrics">
-      <div class="cost-metric"><span>Venta sin IGV</span><strong>${formatter(result.netRevenue)}</strong></div>
+      <div class="cost-metric"><span>Monto antes del descuento</span><strong>${formatter(result.grossRevenue)}</strong></div>
+      <div class="cost-metric"><span>Descuento (${formatPercent(result.advertisingDiscount)})</span><strong>− ${formatter(result.discount)}</strong></div>
+      <div class="cost-metric"><span>Venta después del descuento</span><strong>${formatter(result.netRevenue)}</strong></div>
       <div class="cost-metric"><span>Costo total</span><strong>${formatter(result.totalCost)}</strong></div>
       <div class="cost-metric ${profitClass}"><span>Utilidad estimada</span><strong>${formatter(result.profit)}</strong></div>
       <div class="cost-metric ${profitClass}"><span>Margen real</span><strong>${formatPercent(result.margin)}</strong></div>
       <div class="cost-metric"><span>IGV (${formatPercent(result.taxRate)})</span><strong>${formatter(result.taxAmount)}</strong></div>
       <div class="cost-metric"><span>Total del servicio con IGV</span><strong>${formatter(result.totalWithTax)}</strong></div>
     </div>
-    <p class="calculation-explainer">Utilidad = venta después del descuento − costo variable − costo fijo. El IGV no se considera ganancia. Este total contempla Barra Libre y el cobro adicional; los demás artículos se suman en la cotización.</p>
+    <p class="calculation-explainer">Monto bruto = precio × pax + cobro adicional. Utilidad = monto bruto − descuento − food cost − costos fijos operativos. El IGV no se considera ganancia. Los demás artículos se suman en la cotización.</p>
     <button class="button button-primary" type="button" data-cost-action="apply-selected">Aplicar ${formatter(price)} a Barra Libre</button>`;
+}
+
+function refreshFixedCostGuidance(formatter) {
+  const warning = document.querySelector("#fixed-cost-warning");
+  const input = document.querySelector('[data-bind="costing.fixedCost"]');
+  if (!warning || !input) return;
+
+  const fixedCost = Math.max(0, finiteNumber(state.costing.fixedCost));
+  const pax = Math.max(0, finiteNumber(state.event.pax));
+  const matchingPrice = state.costing.priceOptions.find((price) => (
+    fixedCost > 0 && Math.abs(fixedCost - pax * Math.max(0, finiteNumber(price))) < 0.01
+  ));
+
+  if (matchingPrice === undefined) {
+    warning.hidden = true;
+    warning.textContent = "";
+    input.setAttribute("aria-describedby", "fixed-cost-help");
+    return;
+  }
+
+  warning.textContent = `${formatter(fixedCost)} coincide con el monto bruto de ${formatter(matchingPrice)} × ${formatQuantity(pax)} pax. Ese monto ya lo calcula la matriz; aquí van solo los costos fijos operativos (${formatter(EXCEL_FIXED_COST)} en el Excel).`;
+  warning.hidden = false;
+  input.setAttribute("aria-describedby", "fixed-cost-help fixed-cost-warning");
 }
 
 function selectCostCombination(priceIndex, consumptionIndex) {
@@ -643,6 +685,15 @@ function applyCostCombination(priceIndex, consumptionIndex) {
   renderItemsEditor();
   renderPreview();
   showToast(`${formatCurrency(price, state.quote.currency)} y ${formatQuantity(consumption.drinksPerPax)} bebidas/pax aplicados`);
+}
+
+function restoreFixedCostFromExcel() {
+  state.costing.fixedCost = EXCEL_FIXED_COST;
+  const input = document.querySelector('[data-bind="costing.fixedCost"]');
+  if (input) input.value = String(EXCEL_FIXED_COST);
+  markDirty();
+  refreshCostCalculator();
+  showToast(`Costo fijo del Excel restaurado: ${formatCurrency(EXCEL_FIXED_COST, state.quote.currency)}`);
 }
 
 function activateTab(tabName) {

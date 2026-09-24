@@ -8,9 +8,9 @@
     <title>Cotizador FuelBar</title>
     <link rel="icon" type="image/png" href="./assets/fuelbar-logo.png" />
     <link rel="apple-touch-icon" href="./assets/fuelbar-logo.png" />
-    <link rel="stylesheet" href="./styles.css?v=6" />
+    <link rel="stylesheet" href="./styles.css?v=7" />
     <script defer src="./vendor/pdf-lib.min.js?v=1"></script>
-    <script type="module" src="./app.js?v=8"></script>
+    <script type="module" src="./app.js?v=9"></script>
   </head>
   <body>
     <header class="app-header">
@@ -117,7 +117,15 @@
             <div class="form-card">
               <h3>Supuestos compartidos</h3>
               <div class="field-grid cols-2">
-                <label class="field">Costo fijo total<input type="number" min="0" step="0.01" data-bind="costing.fixedCost" /></label>
+                <div class="field">
+                  <div class="field-label-row">
+                    <label for="fixed-cost-input">Costos fijos operativos</label>
+                    <button class="text-button field-action" type="button" data-cost-action="restore-fixed-cost">Usar S/ 3,340</button>
+                  </div>
+                  <input id="fixed-cost-input" type="number" min="0" step="0.01" data-bind="costing.fixedCost" aria-describedby="fixed-cost-help" />
+                  <span class="field-help" id="fixed-cost-help">Es el total de la hoja «Costeo Fijo». El monto bruto antes del descuento se calcula con precio × pax.</span>
+                  <span class="field-warning" id="fixed-cost-warning" role="status" hidden></span>
+                </div>
                 <label class="field">Descuento publicidad (%)<input type="number" min="0" max="100" step="0.01" data-bind="costing.advertisingDiscount" /></label>
                 <label class="field span-2">Cobro adicional<input type="number" min="0" step="0.01" data-bind="costing.additionalCharge" /></label>
               </div>

@@ -348,6 +348,34 @@ button:disabled {
   font-weight: 500;
 }
 
+.field-label-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.field-action {
+  flex: 0 0 auto;
+  padding: 0;
+  font-size: 11px;
+}
+
+.field-warning {
+  padding: 8px 9px;
+  color: #784b00;
+  background: #fff4d6;
+  border: 1px solid #f0d28c;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.field-warning[hidden] {
+  display: none;
+}
+
 .field-error {
   color: var(--danger);
   font-size: 12px;
