@@ -94,7 +94,7 @@ export const DEFAULT_STATE = {
     website: "fuelbar.pe",
   },
   customer: {
-    name: "Silvana Arbulú - Casino de La Policía",
+    name: "Editar nombre de Cliente",
     taxId: "",
     email: "",
     phone: "",
