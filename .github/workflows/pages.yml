@@ -1,4 +1,4 @@
-name: Publicar cotizador en GitHub Pages
+name: cotizador fuelbar
 
 on:
   push:
