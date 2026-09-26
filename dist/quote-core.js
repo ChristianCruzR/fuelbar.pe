@@ -94,7 +94,7 @@ export const DEFAULT_STATE = {
     website: "fuelbar.pe",
   },
   customer: {
-    name: "Editar nombre de Cliente",
+    name: "Cliente",
     taxId: "",
     email: "",
     phone: "",
