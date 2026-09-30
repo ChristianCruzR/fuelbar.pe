@@ -8,9 +8,9 @@
     <title>Cotizador FuelBar</title>
     <link rel="icon" type="image/png" href="./assets/fuelbar-logo.png" />
     <link rel="apple-touch-icon" href="./assets/fuelbar-logo.png" />
-    <link rel="stylesheet" href="./styles.css?v=10" />
+    <link rel="stylesheet" href="./styles.css?v=11" />
     <script defer src="./vendor/pdf-lib.min.js?v=1"></script>
-    <script type="module" src="./app.js?v=11"></script>
+    <script type="module" src="./app.js?v=12"></script>
   </head>
   <body>
     <header class="app-header">
@@ -113,7 +113,25 @@
               </div>
             </div>
 
-            <p class="section-note">Cruza tres precios con tres probabilidades de consumo por pax. La utilidad no incluye el IGV y este análisis interno no aparece en el PDF.</p>
+            <p class="section-note" id="costing-context-note">Cruza tres precios con tres probabilidades de consumo por pax. La utilidad no incluye el IGV y este análisis interno no aparece en el PDF.</p>
+
+            <article class="form-card costing-mode-card">
+              <h3>Tipo de servicio</h3>
+              <fieldset class="costing-mode-switch" aria-describedby="costing-mode-help">
+                <legend class="sr-only">Tipo de cálculo</legend>
+                <label class="costing-mode-option">
+                  <input type="radio" name="costing-mode" value="openBar" data-costing-mode />
+                  <strong>Barra libre</strong>
+                  <small>Precio por pax × consumo estimado</small>
+                </label>
+                <label class="costing-mode-option">
+                  <input type="radio" name="costing-mode" value="prepaidCups" data-costing-mode />
+                  <strong>Vasos prepagados</strong>
+                  <small>Precio por vaso × cantidad contratada</small>
+                </label>
+              </fieldset>
+              <p class="field-help" id="costing-mode-help">Cambiar el modo solo actualiza el análisis. Usa «Aplicar» para llevar la combinación elegida a la cotización.</p>
+            </article>
 
             <div class="form-card">
               <h3>Supuestos compartidos</h3>
@@ -196,6 +214,7 @@
                   <option value="bartruck">BarTruck</option>
                   <option value="water">Servicio de Agua y Gaseosas</option>
                   <option value="openBar">Servicio de Bar - Barra Libre</option>
+                  <option value="prepaidCups">Servicio de Bar - Vasos Prepagados</option>
                   <option value="transport">Transporte</option>
                 </select>
               </label>

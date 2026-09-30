@@ -2,6 +2,7 @@ import {
   ITEM_PRESETS,
   STORAGE_KEY,
   calculateCostScenario,
+  calculateUnitCostScenario,
   calculateItem,
   calculateQuote,
   cloneDefaultState,
@@ -10,7 +11,7 @@ import {
   formatDate,
   formatTime,
   quoteFilename,
-} from "./quote-core.js?v=6";
+} from "./quote-core.js?v=7";
 import { createQuotePdfBlob } from "./pdf-export.js?v=6";
 import {
   COSTING_MODEL_REVISION,
@@ -43,6 +44,7 @@ const dom = {
   previewSummary: document.querySelector("#preview-summary"),
   itemsEditor: document.querySelector("#items-editor"),
   costingEditor: document.querySelector("#costing-editor"),
+  costingContextNote: document.querySelector("#costing-context-note"),
   fixedCostTotal: document.querySelector("#fixed-cost-total"),
   costingFileInput: document.querySelector("#costing-file-input"),
   costingImportStatus: document.querySelector("#costing-import-status"),
@@ -197,7 +199,7 @@ function registerWebMcpTools() {
         const values = requirePlainObject(input);
         const priceIndex = finiteNumber(values.priceOption, 0) - 1;
         const consumptionIndex = finiteNumber(values.consumptionOption, 0) - 1;
-        if (!Number.isInteger(priceIndex) || !state.costing.priceOptions[priceIndex]) {
+        if (!Number.isInteger(priceIndex) || !Number.isFinite(state.costing.priceOptions[priceIndex])) {
           throw new Error("priceOption debe ser 1, 2 o 3");
         }
         if (!Number.isInteger(consumptionIndex) || !state.costing.consumptionOptions[consumptionIndex]) {
@@ -206,11 +208,47 @@ function registerWebMcpTools() {
         if (!hasValidConsumptionDistribution()) {
           throw new Error("Los porcentajes de consumo deben sumar 100% antes de aplicar una combinación");
         }
-        selectCostCombination(priceIndex, consumptionIndex);
-        applyCostCombination(priceIndex, consumptionIndex);
+        selectCostCombination(priceIndex, consumptionIndex, "openBar");
+        applyCostCombination(priceIndex, consumptionIndex, "openBar");
         return {
           appliedPriceOption: priceIndex + 1,
           appliedConsumptionOption: consumptionIndex + 1,
+          ...getQuoteSummary(),
+        };
+      },
+    },
+    {
+      name: "apply_prepaid_cups_combination",
+      title: "Aplicar combinación de vasos prepagados",
+      description: "Aplica uno de los nueve cruces entre precio por vaso y cantidad contratada al artículo de Vasos Prepagados.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          priceOption: { type: "integer", minimum: 1, maximum: 3 },
+          quantityOption: { type: "integer", minimum: 1, maximum: 3 },
+        },
+        required: ["priceOption", "quantityOption"],
+        additionalProperties: false,
+      },
+      annotations: { readOnlyHint: false, untrustedContentHint: false },
+      execute(input) {
+        const values = requirePlainObject(input);
+        const priceIndex = finiteNumber(values.priceOption, 0) - 1;
+        const quantityIndex = finiteNumber(values.quantityOption, 0) - 1;
+        if (!Number.isInteger(priceIndex) || !Number.isFinite(state.costing.prepaidCups.priceOptions[priceIndex])) {
+          throw new Error("priceOption debe ser 1, 2 o 3");
+        }
+        if (!Number.isInteger(quantityIndex) || !Number.isFinite(state.costing.prepaidCups.quantityOptions[quantityIndex])) {
+          throw new Error("quantityOption debe ser 1, 2 o 3");
+        }
+        if (!hasValidConsumptionDistribution()) {
+          throw new Error("Los porcentajes de consumo deben sumar 100% antes de aplicar una combinación");
+        }
+        selectCostCombination(priceIndex, quantityIndex, "prepaidCups");
+        applyCostCombination(priceIndex, quantityIndex, "prepaidCups");
+        return {
+          appliedPriceOption: priceIndex + 1,
+          appliedQuantityOption: quantityIndex + 1,
           ...getQuoteSummary(),
         };
       },
@@ -319,6 +357,29 @@ function normalizeState(candidate) {
   if (normalized.costing.priceOptions.length !== 3) normalized.costing.priceOptions = defaultCosting.priceOptions;
   if (normalized.costing.consumptionOptions.length !== 3) normalized.costing.consumptionOptions = defaultCosting.consumptionOptions;
   normalized.costing.priceOptions = normalized.costing.priceOptions.map((value) => Math.max(0, finiteNumber(value)));
+  normalized.costing.calculationMode = ["openBar", "prepaidCups"].includes(normalized.costing.calculationMode)
+    ? normalized.costing.calculationMode
+    : "openBar";
+  const defaultPrepaidCups = defaultCosting.prepaidCups;
+  normalized.costing.prepaidCups = normalized.costing.prepaidCups
+    && typeof normalized.costing.prepaidCups === "object"
+    && !Array.isArray(normalized.costing.prepaidCups)
+    ? normalized.costing.prepaidCups
+    : structuredClone(defaultPrepaidCups);
+  if (!Array.isArray(normalized.costing.prepaidCups.priceOptions)
+    || normalized.costing.prepaidCups.priceOptions.length !== 3) {
+    normalized.costing.prepaidCups.priceOptions = [...defaultPrepaidCups.priceOptions];
+  }
+  if (!Array.isArray(normalized.costing.prepaidCups.quantityOptions)
+    || normalized.costing.prepaidCups.quantityOptions.length !== 3) {
+    normalized.costing.prepaidCups.quantityOptions = [...defaultPrepaidCups.quantityOptions];
+  }
+  normalized.costing.prepaidCups.priceOptions = normalized.costing.prepaidCups.priceOptions.map((value, index) => (
+    Math.max(0, finiteNumber(value, defaultPrepaidCups.priceOptions[index]))
+  ));
+  normalized.costing.prepaidCups.quantityOptions = normalized.costing.prepaidCups.quantityOptions.map((value, index) => (
+    Math.max(1, Math.round(finiteNumber(value, defaultPrepaidCups.quantityOptions[index])))
+  ));
   const modelDefaults = cloneCostingModelDefaults();
   if (Array.isArray(normalized.costing.fixedCostItems)) {
     normalized.costing.fixedCostItems = normalizeFixedCostItems(normalized.costing.fixedCostItems);
@@ -360,6 +421,14 @@ function normalizeState(candidate) {
   normalized.costing.modelRevision = COSTING_MODEL_REVISION;
   normalized.costing.selectedPriceIndex = clampOptionIndex(normalized.costing.selectedPriceIndex, 1);
   normalized.costing.selectedConsumptionIndex = clampOptionIndex(normalized.costing.selectedConsumptionIndex, 1);
+  normalized.costing.prepaidCups.selectedPriceIndex = clampOptionIndex(
+    normalized.costing.prepaidCups.selectedPriceIndex,
+    defaultPrepaidCups.selectedPriceIndex,
+  );
+  normalized.costing.prepaidCups.selectedQuantityIndex = clampOptionIndex(
+    normalized.costing.prepaidCups.selectedQuantityIndex,
+    defaultPrepaidCups.selectedQuantityIndex,
+  );
   delete normalized.costing.scenarios;
   return normalized;
 }
@@ -471,6 +540,24 @@ function wireEvents() {
       return;
     }
 
+    if (target.matches("[data-prepaid-price]")) {
+      const index = Number(target.dataset.prepaidPrice);
+      if (!Number.isInteger(index) || !Object.hasOwn(state.costing.prepaidCups.priceOptions, index)) return;
+      state.costing.prepaidCups.priceOptions[index] = Math.max(0, readInputValue(target));
+      markDirty();
+      refreshCostCalculator();
+      return;
+    }
+
+    if (target.matches("[data-prepaid-quantity]")) {
+      const index = Number(target.dataset.prepaidQuantity);
+      if (!Number.isInteger(index) || !Object.hasOwn(state.costing.prepaidCups.quantityOptions, index)) return;
+      state.costing.prepaidCups.quantityOptions[index] = Math.max(1, Math.round(readInputValue(target)));
+      markDirty();
+      refreshCostCalculator();
+      return;
+    }
+
     if (target.matches("[data-consumption-field]")) {
       const index = Number(target.dataset.consumptionIndex);
       const option = state.costing.consumptionOptions[index];
@@ -525,6 +612,12 @@ function wireEvents() {
       void importCostingWorkbook(target.files?.[0]);
       return;
     }
+    if (target.matches("[data-costing-mode]") && target.checked) {
+      state.costing.calculationMode = target.value === "prepaidCups" ? "prepaidCups" : "openBar";
+      markDirty();
+      renderCostingEditor();
+      return;
+    }
     if (target.matches("[data-bind]")) {
       setByPath(state, target.dataset.bind, readInputValue(target));
       markDirty();
@@ -575,10 +668,15 @@ function wireEvents() {
 
     const costAction = event.target.closest("[data-cost-action]");
     if (costAction?.dataset.costAction === "select") {
-      selectCostCombination(Number(costAction.dataset.priceIndex), Number(costAction.dataset.consumptionIndex));
+      selectCostCombination(
+        Number(costAction.dataset.priceIndex),
+        Number(costAction.dataset.optionIndex ?? costAction.dataset.consumptionIndex),
+        costAction.dataset.calculationMode || state.costing.calculationMode,
+      );
     }
     if (costAction?.dataset.costAction === "apply-selected") {
-      applyCostCombination(state.costing.selectedPriceIndex, state.costing.selectedConsumptionIndex);
+      const selection = getSelectedCostingCombination();
+      applyCostCombination(selection.priceIndex, selection.optionIndex, selection.mode);
     }
     if (costAction?.dataset.costAction === "open-cost-model") {
       activateTab("cost-model", { focusPanel: true });
@@ -607,36 +705,59 @@ function wireEvents() {
 
 function renderCostingEditor() {
   if (!dom.costingEditor) return;
-  const priceFields = state.costing.priceOptions.map((price, index) => `
-    <label class="field">Precio ${index + 1}<input type="number" min="0" step="0.01" data-cost-price="${index}" value="${escapeAttribute(price)}" /></label>`).join("");
-  const consumptionFields = state.costing.consumptionOptions.map((option, index) => `
-    <div class="consumption-option">
-      <span class="scenario-pill">Probabilidad ${index + 1}</span>
-      <label class="field">Bebidas por pax<input type="number" min="0" step="1" data-consumption-index="${index}" data-consumption-field="drinksPerPax" value="${escapeAttribute(option.drinksPerPax)}" /></label>
-      <label class="field">Food cost por pax<input type="number" min="0" step="0.00001" data-consumption-cost="${index}" value="${escapeAttribute(option.foodCostPerPax)}" readonly aria-readonly="true" /><span class="field-help">Calculado automáticamente</span></label>
-    </div>`).join("");
+  const prepaidMode = state.costing.calculationMode === "prepaidCups";
+  const activePrices = prepaidMode
+    ? state.costing.prepaidCups.priceOptions
+    : state.costing.priceOptions;
+  const priceFields = activePrices.map((price, index) => `
+    <label class="field">Precio ${index + 1}<input type="number" min="0" step="0.01" ${prepaidMode ? `data-prepaid-price="${index}"` : `data-cost-price="${index}"`} value="${escapeAttribute(price)}" /></label>`).join("");
+  const optionFields = prepaidMode
+    ? `<div class="price-options">${state.costing.prepaidCups.quantityOptions.map((quantity, index) => `
+        <label class="field">Cantidad ${index + 1}<input type="number" min="1" max="1000000" step="1" data-prepaid-quantity="${index}" value="${escapeAttribute(quantity)}" /></label>`).join("")}</div>
+      <p class="prepaid-cost-note">Costo ponderado actual por vaso: ${formatCurrency(calculateWeightedDrinkCost(state.costing.beverageProfiles), state.quote.currency)}</p>`
+    : `<div class="consumption-options">${state.costing.consumptionOptions.map((option, index) => `
+        <div class="consumption-option">
+          <span class="scenario-pill">Probabilidad ${index + 1}</span>
+          <label class="field">Bebidas por pax<input type="number" min="0" step="1" data-consumption-index="${index}" data-consumption-field="drinksPerPax" value="${escapeAttribute(option.drinksPerPax)}" /></label>
+          <label class="field">Food cost por pax<input type="number" min="0" step="0.00001" data-consumption-cost="${index}" value="${escapeAttribute(option.foodCostPerPax)}" readonly aria-readonly="true" /><span class="field-help">Calculado automáticamente</span></label>
+        </div>`).join("")}</div>`;
 
   dom.costingEditor.innerHTML = `
     <article class="form-card">
-      <h3>Precios a comparar</h3>
+      <h3>${prepaidMode ? "Precios por vaso a comparar" : "Precios por pax a comparar"}</h3>
       <div class="price-options">${priceFields}</div>
     </article>
     <article class="form-card">
-      <h3>Probabilidades de consumo</h3>
-      <div class="consumption-options">${consumptionFields}</div>
+      <h3>${prepaidMode ? "Cantidades prepagadas de vasos" : "Probabilidades de consumo"}</h3>
+      ${optionFields}
     </article>
     <article class="form-card matrix-card">
       <div class="card-heading-row">
         <div>
           <p class="eyebrow">9 combinaciones</p>
-          <h3>Matriz de utilidad y margen</h3>
+          <h3 id="cost-matrix-title">Matriz de utilidad y margen</h3>
         </div>
         <span class="calculation-note">IGV separado de la utilidad</span>
       </div>
-      <div id="cost-matrix" class="matrix-scroll"></div>
+      <div id="cost-matrix" class="matrix-scroll" role="region" aria-labelledby="cost-matrix-title" tabindex="0"></div>
     </article>
     <article id="selected-cost-summary" class="selected-cost-summary"></article>`;
+  syncCostingModeUI();
   refreshCostCalculator();
+}
+
+function syncCostingModeUI() {
+  const mode = state.costing.calculationMode === "prepaidCups" ? "prepaidCups" : "openBar";
+  document.querySelectorAll("[data-costing-mode]").forEach((input) => {
+    const active = input.value === mode;
+    input.checked = active;
+    input.closest(".costing-mode-option")?.classList.toggle("is-active", active);
+  });
+  if (dom.costingContextNote) {
+    dom.costingContextNote.textContent = mode === "prepaidCups"
+      ? "Cruza tres precios por vaso con tres cantidades prepagadas. El costo por vaso usa la mezcla de bebidas configurada en Costos. La utilidad no incluye el IGV y este análisis interno no aparece en el PDF."
+      : "Cruza tres precios con tres probabilidades de consumo por pax. La utilidad no incluye el IGV y este análisis interno no aparece en el PDF.";
+  }
 }
 
 function renderCostModelEditor() {
@@ -901,6 +1022,10 @@ function refreshCostCalculator() {
   if (!matrix || !summary) return;
   const formatter = (value) => formatCurrency(value, state.quote.currency);
   if (dom.fixedCostTotal) dom.fixedCostTotal.textContent = formatter(state.costing.fixedCost);
+  const prepaidCostNote = document.querySelector(".prepaid-cost-note");
+  if (prepaidCostNote) {
+    prepaidCostNote.textContent = `Costo ponderado actual por vaso: ${formatter(calculateWeightedDrinkCost(state.costing.beverageProfiles))}`;
+  }
   if (!hasValidConsumptionDistribution()) {
     const percentTotal = calculateConsumptionPercentTotal(state.costing.beverageProfiles);
     const message = `La distribución actual suma ${formatEditableNumber(percentTotal, 2)}%. Complétala hasta 100% para calcular y aplicar una utilidad válida.`;
@@ -917,10 +1042,18 @@ function refreshCostCalculator() {
       </div>`;
     return;
   }
+  if (state.costing.calculationMode === "prepaidCups") {
+    renderPrepaidCupsCalculator(matrix, summary, formatter);
+    return;
+  }
+  renderOpenBarCalculator(matrix, summary, formatter);
+}
+
+function renderOpenBarCalculator(matrix, summary, formatter) {
   const selectedPrice = state.costing.selectedPriceIndex;
   const selectedConsumption = state.costing.selectedConsumptionIndex;
   const headerCells = state.costing.consumptionOptions.map((option) => `
-    <th><strong>${formatQuantity(option.drinksPerPax)} bebidas</strong><span>${formatter(option.foodCostPerPax)} food cost / pax</span></th>`).join("");
+    <th scope="col"><strong>${formatQuantity(option.drinksPerPax)} bebidas</strong><span>${formatter(option.foodCostPerPax)} food cost / pax</span></th>`).join("");
   const rows = state.costing.priceOptions.map((price, priceIndex) => {
     const cells = state.costing.consumptionOptions.map((option, consumptionIndex) => {
       const result = calculateCostScenario(state, { pricePerPax: price, foodCostPerPax: option.foodCostPerPax });
@@ -928,7 +1061,7 @@ function refreshCostCalculator() {
       const profitClass = result.profit < 0 ? "is-loss" : "is-profit";
       const accessibleLabel = `Precio ${formatter(price)}, ${formatQuantity(option.drinksPerPax)} bebidas por pax, utilidad ${formatter(result.profit)}, margen ${formatPercent(result.margin)}`;
       return `<td>
-        <button class="matrix-choice ${selected ? "is-selected" : ""}" type="button" data-cost-action="select" data-price-index="${priceIndex}" data-consumption-index="${consumptionIndex}" aria-label="${escapeAttribute(accessibleLabel)}" aria-pressed="${selected}">
+        <button class="matrix-choice ${selected ? "is-selected" : ""}" type="button" data-cost-action="select" data-calculation-mode="openBar" data-price-index="${priceIndex}" data-option-index="${consumptionIndex}" aria-label="${escapeAttribute(accessibleLabel)}" aria-pressed="${selected}">
           <span class="matrix-choice-label">Utilidad</span>
           <strong class="${profitClass}">${formatter(result.profit)}</strong>
           <span>Margen ${formatPercent(result.margin)}</span>
@@ -937,19 +1070,78 @@ function refreshCostCalculator() {
     }).join("");
     return `<tr><th class="price-heading" scope="row"><span>Precio / pax</span><strong>${formatter(price)}</strong></th>${cells}</tr>`;
   }).join("");
-  matrix.innerHTML = `<table class="cost-matrix"><caption class="sr-only">Utilidad y margen para cada cruce de precio y bebidas estimadas por pax</caption><thead><tr><th scope="col">Precio</th>${headerCells.replaceAll("<th>", '<th scope="col">')}</tr></thead><tbody>${rows}</tbody></table>`;
+  matrix.innerHTML = `<table class="cost-matrix"><caption class="sr-only">Utilidad y margen para cada cruce de precio y bebidas estimadas por pax</caption><thead><tr><th class="price-heading" scope="col">Precio</th>${headerCells}</tr></thead><tbody>${rows}</tbody></table>`;
 
   const price = state.costing.priceOptions[selectedPrice];
   const option = state.costing.consumptionOptions[selectedConsumption];
   const result = calculateCostScenario(state, { pricePerPax: price, foodCostPerPax: option.foodCostPerPax });
+  renderSelectedCostSummary(summary, formatter, result, {
+    title: `${formatter(price)} · ${formatQuantity(option.drinksPerPax)} bebidas por pax`,
+    pill: `${formatQuantity(state.event.pax)} pax`,
+    explanation: "Monto bruto = precio × pax + cobro adicional. Utilidad = monto bruto − descuento − food cost − costos fijos operativos. El IGV no se considera ganancia. Los demás artículos se suman en la cotización.",
+    buttonLabel: `Aplicar ${formatter(price)} a Barra Libre`,
+  });
+}
+
+function renderPrepaidCupsCalculator(matrix, summary, formatter) {
+  const prepaid = state.costing.prepaidCups;
+  const weightedCost = calculateWeightedDrinkCost(state.costing.beverageProfiles);
+  const selectedPrice = prepaid.selectedPriceIndex;
+  const selectedQuantity = prepaid.selectedQuantityIndex;
+  const headerCells = prepaid.quantityOptions.map((quantity) => {
+    const result = calculateUnitCostScenario(state, {
+      quantity,
+      unitPrice: 0,
+      variableCostPerUnit: weightedCost,
+    });
+    return `<th scope="col"><strong>${formatQuantity(quantity)} vasos</strong><span>${formatter(result.variableCost)} costo variable</span></th>`;
+  }).join("");
+  const rows = prepaid.priceOptions.map((price, priceIndex) => {
+    const cells = prepaid.quantityOptions.map((quantity, quantityIndex) => {
+      const result = calculateUnitCostScenario(state, {
+        quantity,
+        unitPrice: price,
+        variableCostPerUnit: weightedCost,
+      });
+      const selected = priceIndex === selectedPrice && quantityIndex === selectedQuantity;
+      const profitClass = result.profit < 0 ? "is-loss" : "is-profit";
+      const accessibleLabel = `Precio ${formatter(price)} por vaso, ${formatQuantity(quantity)} vasos prepagados, utilidad ${formatter(result.profit)}, margen ${formatPercent(result.margin)}`;
+      return `<td>
+        <button class="matrix-choice ${selected ? "is-selected" : ""}" type="button" data-cost-action="select" data-calculation-mode="prepaidCups" data-price-index="${priceIndex}" data-option-index="${quantityIndex}" aria-label="${escapeAttribute(accessibleLabel)}" aria-pressed="${selected}">
+          <span class="matrix-choice-label">Utilidad</span>
+          <strong class="${profitClass}">${formatter(result.profit)}</strong>
+          <span>Margen ${formatPercent(result.margin)}</span>
+        </button>
+      </td>`;
+    }).join("");
+    return `<tr><th class="price-heading" scope="row"><span>Precio / vaso</span><strong>${formatter(price)}</strong></th>${cells}</tr>`;
+  }).join("");
+  matrix.innerHTML = `<table class="cost-matrix"><caption class="sr-only">Utilidad y margen para cada cruce de precio por vaso y cantidad prepagada</caption><thead><tr><th class="price-heading" scope="col">Precio</th>${headerCells}</tr></thead><tbody>${rows}</tbody></table>`;
+
+  const price = prepaid.priceOptions[selectedPrice];
+  const quantity = prepaid.quantityOptions[selectedQuantity];
+  const result = calculateUnitCostScenario(state, {
+    quantity,
+    unitPrice: price,
+    variableCostPerUnit: weightedCost,
+  });
+  renderSelectedCostSummary(summary, formatter, result, {
+    title: `${formatter(price)} por vaso · ${formatQuantity(quantity)} vasos prepagados`,
+    pill: `${formatQuantity(quantity)} vasos`,
+    explanation: "Monto bruto = precio por vaso × cantidad prepagada + cobro adicional. Costo variable = costo ponderado por bebida × vasos. Utilidad = monto bruto − descuento − costo variable − costos fijos operativos. El IGV no se considera ganancia. Los demás artículos se suman en la cotización.",
+    buttonLabel: `Aplicar ${formatter(price)} por vaso · ${formatQuantity(quantity)} vasos`,
+  });
+}
+
+function renderSelectedCostSummary(summary, formatter, result, content) {
   const profitClass = result.profit < 0 ? "is-loss" : "is-profit";
   summary.innerHTML = `
     <div class="selected-summary-heading">
       <div>
         <p class="eyebrow">Combinación seleccionada</p>
-        <h3>${formatter(price)} · ${formatQuantity(option.drinksPerPax)} bebidas por pax</h3>
+        <h3>${content.title}</h3>
       </div>
-      <span class="scenario-pill">${formatQuantity(state.event.pax)} pax</span>
+      <span class="scenario-pill">${content.pill}</span>
     </div>
     <div class="cost-metrics">
       <div class="cost-metric"><span>Monto antes del descuento</span><strong>${formatter(result.grossRevenue)}</strong></div>
@@ -961,39 +1153,113 @@ function refreshCostCalculator() {
       <div class="cost-metric"><span>IGV (${formatPercent(result.taxRate)})</span><strong>${formatter(result.taxAmount)}</strong></div>
       <div class="cost-metric"><span>Total del servicio con IGV</span><strong>${formatter(result.totalWithTax)}</strong></div>
     </div>
-    <p class="calculation-explainer">Monto bruto = precio × pax + cobro adicional. Utilidad = monto bruto − descuento − food cost − costos fijos operativos. El IGV no se considera ganancia. Los demás artículos se suman en la cotización.</p>
-    <button class="button button-primary" type="button" data-cost-action="apply-selected">Aplicar ${formatter(price)} a Barra Libre</button>`;
+    <p class="calculation-explainer">${content.explanation}</p>
+    <button class="button button-primary" type="button" data-cost-action="apply-selected">${content.buttonLabel}</button>`;
 }
 
-function selectCostCombination(priceIndex, consumptionIndex) {
-  if (!Number.isFinite(state.costing.priceOptions[priceIndex]) || !state.costing.consumptionOptions[consumptionIndex]) return;
-  state.costing.selectedPriceIndex = priceIndex;
-  state.costing.selectedConsumptionIndex = consumptionIndex;
+function getSelectedCostingCombination(mode = state.costing.calculationMode) {
+  if (mode === "prepaidCups") {
+    return {
+      mode,
+      priceIndex: state.costing.prepaidCups.selectedPriceIndex,
+      optionIndex: state.costing.prepaidCups.selectedQuantityIndex,
+    };
+  }
+  return {
+    mode: "openBar",
+    priceIndex: state.costing.selectedPriceIndex,
+    optionIndex: state.costing.selectedConsumptionIndex,
+  };
+}
+
+function selectCostCombination(priceIndex, optionIndex, mode = state.costing.calculationMode) {
+  const normalizedMode = mode === "prepaidCups" ? "prepaidCups" : "openBar";
+  const previousMode = state.costing.calculationMode;
+  if (normalizedMode === "prepaidCups") {
+    if (!Number.isFinite(state.costing.prepaidCups.priceOptions[priceIndex])
+      || !Number.isFinite(state.costing.prepaidCups.quantityOptions[optionIndex])) return;
+    state.costing.prepaidCups.selectedPriceIndex = priceIndex;
+    state.costing.prepaidCups.selectedQuantityIndex = optionIndex;
+  } else {
+    if (!Number.isFinite(state.costing.priceOptions[priceIndex]) || !state.costing.consumptionOptions[optionIndex]) return;
+    state.costing.selectedPriceIndex = priceIndex;
+    state.costing.selectedConsumptionIndex = optionIndex;
+  }
+  state.costing.calculationMode = normalizedMode;
   markDirty();
-  refreshCostCalculator();
+  if (previousMode !== normalizedMode) renderCostingEditor();
+  else refreshCostCalculator();
 }
 
-function applyCostCombination(priceIndex, consumptionIndex) {
+function getPrimaryServiceIndexes() {
+  const presetNames = new Set([
+    ITEM_PRESETS.openBar.name.toLocaleLowerCase("es"),
+    ITEM_PRESETS.prepaidCups.name.toLocaleLowerCase("es"),
+  ]);
+  return state.items.reduce((indexes, item, index) => {
+    const exactPreset = ["openBar", "prepaidCups"].includes(item.presetKey);
+    const exactPresetName = presetNames.has(item.name.trim().toLocaleLowerCase("es"));
+    if (exactPreset || exactPresetName) indexes.push(index);
+    return indexes;
+  }, []);
+}
+
+function syncDefaultEventTitle(prepaidMode) {
+  const currentEventTitle = state.event.title.trim().toLocaleLowerCase("es");
+  if (!["servicio de barra libre", "servicio de vasos prepagados"].includes(currentEventTitle)) return;
+  state.event.title = prepaidMode ? "Servicio de vasos prepagados" : "Servicio de barra libre";
+  const eventTitleInput = document.querySelector('[data-bind="event.title"]');
+  if (eventTitleInput) eventTitleInput.value = state.event.title;
+}
+
+function applyCostCombination(priceIndex, optionIndex, mode = state.costing.calculationMode) {
   if (!hasValidConsumptionDistribution()) {
     showToast("Completa los porcentajes de consumo hasta 100%", true);
     activateTab("cost-model", { focusPanel: true });
     return false;
   }
-  const price = state.costing.priceOptions[priceIndex];
-  const consumption = state.costing.consumptionOptions[consumptionIndex];
-  if (!Number.isFinite(price) || !consumption) return false;
-  let barItem = state.items.find((item) => item.presetKey === "openBar")
-    || state.items.find((item) => item.name.toLocaleLowerCase("es").includes("barra libre"));
-  if (!barItem) {
-    barItem = normalizeItem({ ...ITEM_PRESETS.openBar });
-    barItem.id = createId();
-    state.items.push(barItem);
+  const normalizedMode = mode === "prepaidCups" ? "prepaidCups" : "openBar";
+  const prepaidMode = normalizedMode === "prepaidCups";
+  const price = prepaidMode
+    ? state.costing.prepaidCups.priceOptions[priceIndex]
+    : state.costing.priceOptions[priceIndex];
+  const selectedOption = prepaidMode
+    ? state.costing.prepaidCups.quantityOptions[optionIndex]
+    : state.costing.consumptionOptions[optionIndex];
+  if (!Number.isFinite(price) || (prepaidMode ? !Number.isFinite(selectedOption) : !selectedOption)) return false;
+
+  const targetPreset = prepaidMode ? ITEM_PRESETS.prepaidCups : ITEM_PRESETS.openBar;
+  const serviceIndexes = getPrimaryServiceIndexes();
+  let serviceIndex = serviceIndexes.find((index) => state.items[index].presetKey === targetPreset.presetKey)
+    ?? serviceIndexes[0];
+  if (!Number.isInteger(serviceIndex)) {
+    const serviceItem = normalizeItem({ ...targetPreset });
+    serviceItem.id = createId();
+    state.items.push(serviceItem);
+    serviceIndex = state.items.length - 1;
   }
-  barItem.unitPrice = Math.max(0, finiteNumber(price));
-  barItem.usePax = true;
-  barItem.quantity = Math.max(1, finiteNumber(state.event.pax, 1));
-  barItem.discountType = finiteNumber(state.costing.advertisingDiscount) > 0 ? "percent" : "none";
-  barItem.discountValue = Math.min(100, Math.max(0, finiteNumber(state.costing.advertisingDiscount)));
+  let serviceItem = state.items[serviceIndex];
+  const alreadyTargetService = serviceItem.presetKey === targetPreset.presetKey
+    || (!serviceItem.presetKey && serviceItem.name.trim().toLocaleLowerCase("es") === targetPreset.name.toLocaleLowerCase("es"));
+  if (!alreadyTargetService) {
+    serviceItem.presetKey = targetPreset.presetKey;
+    serviceItem.name = targetPreset.name;
+    serviceItem.description = targetPreset.description;
+  } else {
+    serviceItem.presetKey = targetPreset.presetKey;
+  }
+  serviceItem.unitPrice = Math.max(0, finiteNumber(price));
+  serviceItem.usePax = !prepaidMode;
+  serviceItem.quantity = prepaidMode
+    ? Math.max(1, Math.round(finiteNumber(selectedOption, 1)))
+    : Math.max(1, finiteNumber(state.event.pax, 1));
+  serviceItem.discountType = finiteNumber(state.costing.advertisingDiscount) > 0 ? "percent" : "none";
+  serviceItem.discountValue = Math.min(100, Math.max(0, finiteNumber(state.costing.advertisingDiscount)));
+
+  syncDefaultEventTitle(prepaidMode);
+
+  state.items = state.items.filter((item, index) => index === serviceIndex || !serviceIndexes.includes(index));
+  serviceItem = state.items.find((item) => item.id === serviceItem.id) || serviceItem;
 
   const extraAmount = Math.max(0, finiteNumber(state.costing.additionalCharge));
   let extraItem = state.items.find((item) => item.presetKey === "additionalCharge")
@@ -1004,15 +1270,21 @@ function applyCostCombination(priceIndex, consumptionIndex) {
       extraItem.id = createId();
       state.items.push(extraItem);
     }
+    extraItem.presetKey = "additionalCharge";
+    extraItem.quantity = 1;
     extraItem.unitPrice = extraAmount;
-    extraItem.discountType = barItem.discountType;
-    extraItem.discountValue = barItem.discountValue;
+    extraItem.usePax = false;
+    extraItem.discountType = serviceItem.discountType;
+    extraItem.discountValue = serviceItem.discountValue;
   }
 
+  state.costing.calculationMode = normalizedMode;
   markDirty();
   renderItemsEditor();
   renderPreview();
-  showToast(`${formatCurrency(price, state.quote.currency)} y ${formatQuantity(consumption.drinksPerPax)} bebidas/pax aplicados`);
+  showToast(prepaidMode
+    ? `${formatQuantity(selectedOption)} vasos a ${formatCurrency(price, state.quote.currency)} aplicados`
+    : `${formatCurrency(price, state.quote.currency)} y ${formatQuantity(selectedOption.drinksPerPax)} bebidas/pax aplicados`);
   return true;
 }
 
@@ -1166,15 +1438,47 @@ function handleItemAction(button) {
 
 function addSelectedItem() {
   const key = dom.presetSelect.value;
-  const source = key === "blank" ? makeBlankItem() : normalizeItem({ ...ITEM_PRESETS[key] });
-  source.id = createId();
-  state.items.push(source);
+  let source = key === "blank" ? makeBlankItem() : normalizeItem({ ...ITEM_PRESETS[key] });
+  let targetIndex;
+  let message = `${source.name || "Artículo"} añadido`;
+  if (["openBar", "prepaidCups"].includes(key)) {
+    const serviceIndexes = getPrimaryServiceIndexes();
+    const targetName = ITEM_PRESETS[key].name.toLocaleLowerCase("es");
+    const existingTargetIndex = serviceIndexes.find((index) => (
+      state.items[index].presetKey === key
+      || (!state.items[index].presetKey && state.items[index].name.trim().toLocaleLowerCase("es") === targetName)
+    ));
+    targetIndex = existingTargetIndex ?? serviceIndexes[0];
+    if (Number.isInteger(existingTargetIndex)) {
+      source = state.items[existingTargetIndex];
+      message = `${source.name} ya estaba en la cotización`;
+    } else if (Number.isInteger(targetIndex)) {
+      const existingId = state.items[targetIndex].id;
+      source.id = existingId;
+      state.items[targetIndex] = source;
+      message = `${source.name} reemplazó al servicio anterior`;
+    } else {
+      source.id = createId();
+      state.items.push(source);
+      targetIndex = state.items.length - 1;
+    }
+    const targetId = source.id;
+    state.items = state.items.filter((item, index) => index === targetIndex || !serviceIndexes.includes(index));
+    targetIndex = state.items.findIndex((item) => item.id === targetId);
+    state.costing.calculationMode = key;
+    syncDefaultEventTitle(key === "prepaidCups");
+    renderCostingEditor();
+  } else {
+    source.id = createId();
+    state.items.push(source);
+    targetIndex = state.items.length - 1;
+  }
   markDirty();
   renderItemsEditor();
   renderPreview();
-  showToast(`${source.name || "Artículo"} añadido`);
+  showToast(message);
   requestAnimationFrame(() => {
-    dom.itemsEditor.lastElementChild?.scrollIntoView({ behavior: "smooth", block: "center" });
+    document.querySelector(`[data-item-card="${targetIndex}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" });
   });
 }
 

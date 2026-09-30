@@ -69,6 +69,29 @@ CÓCTELES INCLUIDOS
     discountValue: 15,
     usePax: true,
   },
+  prepaidCups: {
+    presetKey: "prepaidCups",
+    name: "Servicio de Bar - Vasos Prepagados",
+    description: `SERVICIO DE BAR POR VASOS PREPAGADOS
+
+[ Menaje: Vasos Acrílicos ]
+
+CANTIDAD DE VASOS CONTRATADA SEGÚN COTIZACIÓN
+
+BASES DE COCTELERÍA: Gin / Ron / Pisco / Vino Tinto
+
+CÓCTELES INCLUIDOS
+• Gin Tonic
+• Chilcano Clásico
+• Chilcano de Maracuyá
+• Cuba Libre
+• Tinto de Verano`,
+    quantity: 500,
+    unitPrice: 20,
+    discountType: "percent",
+    discountValue: 15,
+    usePax: false,
+  },
   transport: {
     presetKey: "transport",
     name: "Transporte",
@@ -117,6 +140,7 @@ export const DEFAULT_STATE = {
     location: "La Molina, Lima",
   },
   costing: {
+    calculationMode: "openBar",
     fixedCost: 3340,
     advertisingDiscount: 15,
     additionalCharge: 0,
@@ -128,6 +152,12 @@ export const DEFAULT_STATE = {
     ],
     selectedPriceIndex: 1,
     selectedConsumptionIndex: 1,
+    prepaidCups: {
+      priceOptions: [15, 20, 25],
+      quantityOptions: [300, 500, 700],
+      selectedPriceIndex: 1,
+      selectedQuantityIndex: 1,
+    },
   },
   items: [
     { ...ITEM_PRESETS.bartruck },
@@ -189,34 +219,34 @@ export function calculateQuote(state) {
   return { lines, grossSubtotal, totalDiscount, taxableSubtotal, taxRate, taxAmount, total };
 }
 
-export function calculateCostScenario(state, scenario) {
-  const pax = Math.max(0, finiteNumber(state.event.pax));
-  const pricePerPax = Math.max(0, finiteNumber(scenario.pricePerPax));
-  const foodCostPerPax = Math.max(0, finiteNumber(scenario.foodCostPerPax));
+export function calculateUnitCostScenario(state, scenario) {
+  const quantity = Math.max(0, finiteNumber(scenario.quantity));
+  const unitPrice = Math.max(0, finiteNumber(scenario.unitPrice));
+  const variableCostPerUnit = Math.max(0, finiteNumber(scenario.variableCostPerUnit));
   const fixedCost = Math.max(0, finiteNumber(state.costing.fixedCost));
   const additionalCharge = Math.max(0, finiteNumber(state.costing.additionalCharge));
   const advertisingDiscount = Math.min(100, Math.max(0, finiteNumber(state.costing.advertisingDiscount)));
   const taxRate = Math.min(100, Math.max(0, finiteNumber(state.quote.taxRate)));
-  const variableCost = roundMoney(pax * foodCostPerPax);
+  const variableCost = roundMoney(quantity * variableCostPerUnit);
   const totalCost = roundMoney(variableCost + fixedCost);
-  const grossRevenue = roundMoney(pax * pricePerPax + additionalCharge);
+  const grossRevenue = roundMoney(quantity * unitPrice + additionalCharge);
   const discount = roundMoney(grossRevenue * advertisingDiscount / 100);
   const netRevenue = roundMoney(grossRevenue - discount);
   const profit = roundMoney(netRevenue - totalCost);
   const margin = netRevenue > 0 ? roundMoney(profit / netRevenue * 100) : 0;
   const taxAmount = roundMoney(netRevenue * taxRate / 100);
   const totalWithTax = roundMoney(netRevenue + taxAmount);
-  const costPerPax = pax > 0 ? roundMoney(totalCost / pax) : 0;
+  const costPerUnit = quantity > 0 ? roundMoney(totalCost / quantity) : 0;
   return {
-    pax,
-    pricePerPax,
-    foodCostPerPax,
+    quantity,
+    unitPrice,
+    variableCostPerUnit,
     fixedCost,
     additionalCharge,
     advertisingDiscount,
     variableCost,
     totalCost,
-    costPerPax,
+    costPerUnit,
     grossRevenue,
     discount,
     netRevenue,
@@ -225,6 +255,24 @@ export function calculateCostScenario(state, scenario) {
     taxRate,
     taxAmount,
     totalWithTax,
+  };
+}
+
+export function calculateCostScenario(state, scenario) {
+  const pax = Math.max(0, finiteNumber(state.event.pax));
+  const pricePerPax = Math.max(0, finiteNumber(scenario.pricePerPax));
+  const foodCostPerPax = Math.max(0, finiteNumber(scenario.foodCostPerPax));
+  const result = calculateUnitCostScenario(state, {
+    quantity: pax,
+    unitPrice: pricePerPax,
+    variableCostPerUnit: foodCostPerPax,
+  });
+  return {
+    ...result,
+    pax,
+    pricePerPax,
+    foodCostPerPax,
+    costPerPax: result.costPerUnit,
   };
 }
 
