@@ -1138,10 +1138,10 @@ function renderSelectedCostSummary(summary, formatter, result, content) {
   summary.innerHTML = `
     <div class="selected-summary-heading">
       <div>
-        <center><p class="eyebrow">Combinación seleccionada</p></center>
+        <p class="eyebrow">Combinación seleccionada</p>
         <h3>${content.title}</h3>
       </div>
-      <span class="scenario-pill">${content.pill}</span>
+      <center><span class="scenario-pill">${content.pill}</span></center>
     </div>
     <div class="cost-metrics">
       <div class="cost-metric"><span>Monto antes del descuento</span><strong>${formatter(result.grossRevenue)}</strong></div>
