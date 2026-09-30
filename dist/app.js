@@ -1141,7 +1141,7 @@ function renderSelectedCostSummary(summary, formatter, result, content) {
         <p class="eyebrow">Combinación seleccionada</p>
         <h3>${content.title}</h3>
       </div>
-      <center><span class="scenario-pill">${content.pill}</span></center>
+      <span class="scenario-pill">${content.pill}</span>
     </div>
     <div class="cost-metrics">
       <div class="cost-metric"><span>Monto antes del descuento</span><strong>${formatter(result.grossRevenue)}</strong></div>
